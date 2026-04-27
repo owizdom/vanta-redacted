@@ -1,0 +1,26 @@
+{
+  "name": "@vanta/haircut",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VANTA resolution-aware haircut h(p,τ,ρ) per paper §4: pure-TS computation with paper-anchored σ(τ) power-law fit. No runtime dependencies.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "typecheck": "tsc -b",
+    "example": "tsx src/example.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
