@@ -1,0 +1,9 @@
+FROM ghcr.io/foundry-rs/foundry:v1.0.0
+
+# Anvil fork of Base Sepolia (chain 84532).
+# Provide BASE_RPC at runtime to pin to a specific upstream.
+ENV BASE_RPC=https://sepolia.base.org
+
+EXPOSE 8545
+
+ENTRYPOINT ["sh", "-c", "anvil --host 0.0.0.0 --port 8545 --chain-id 84532 --block-time 2 --fork-url $BASE_RPC"]
