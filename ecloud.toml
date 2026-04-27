@@ -1,0 +1,25 @@
+# EigenCompute deployment manifest.
+# Filled progressively: image set in Phase 11; egress allowlist expands as packages land.
+
+[app]
+name = "vanta"
+description = "Autonomous risk engine for prediction-market credit"
+
+[runtime]
+shape = "g1-standard-4t"
+image = ""
+healthcheck = "/healthz"
+
+[attestation]
+mode = "kms-jwt"
+rebind_seconds = 3600
+
+[egress]
+allow = [
+  "ai-gateway.vercel.sh",
+  "clob.polymarket.com",
+  "gateway-api.polymarket.com",
+  "sepolia.base.org",
+  "rpc-amoy.polygon.technology",
+  "walrus.xyz",
+]
