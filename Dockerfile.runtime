@@ -1,0 +1,55 @@
+# syntax=docker/dockerfile:1.7
+# VANTA runtime image. Multi-stage: deps -> build -> minimal runtime.
+# Pin lines mirror versions.json. v2 — no Minecraft watchable layer
+# (paper/viewer/npcs not in scope). Reproducibility is the prerequisite
+# for the EigenCompute image audit (paper §13 Month 2).
+FROM node:20.11-slim AS deps
+ENV PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    CI=1
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+WORKDIR /app
+
+# Lockfile + workspace declaration first so the dependency graph
+# resolves before we copy any source code (better cache reuse).
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY tsconfig.base.json tsconfig.json ./
+
+# Per-package package.json copies (pnpm needs them all to compute the
+# graph). New workspace packages must be added here.
+COPY tee/package.json tee/
+COPY events/package.json events/
+COPY treasury/package.json treasury/
+COPY constitution/package.json constitution/
+COPY venue-poly/package.json venue-poly/
+COPY mark/package.json mark/
+COPY pledge/package.json pledge/
+COPY haircut/package.json haircut/
+COPY origination/package.json origination/
+COPY verify/package.json verify/
+COPY runtime/package.json runtime/
+
+RUN pnpm fetch
+
+# Now the source.
+COPY tee/ tee/
+COPY events/ events/
+COPY treasury/ treasury/
+COPY constitution/ constitution/
+COPY venue-poly/ venue-poly/
+COPY mark/ mark/
+COPY pledge/ pledge/
+COPY haircut/ haircut/
+COPY origination/ origination/
+COPY verify/ verify/
+COPY runtime/ runtime/
+
+RUN pnpm install -r --offline --frozen-lockfile --ignore-scripts
+RUN pnpm --filter @vanta/runtime build
+RUN pnpm deploy --filter @vanta/runtime --prod --ignore-scripts /out
+
+FROM node:20.11-slim
+WORKDIR /app
+COPY --from=deps /out /app
+EXPOSE 8787
+CMD ["node", "dist/main.js"]
