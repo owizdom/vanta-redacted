@@ -1,0 +1,16 @@
+node_modules
+dist
+build
+out
+.git
+.vanta
+vanta-data
+.env
+.env.*
+*.tsbuildinfo
+coverage
+.DS_Store
+roadmap
+contracts/out
+contracts/cache
+contracts/broadcast
