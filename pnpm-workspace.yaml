@@ -1,0 +1,13 @@
+packages:
+  - "tee"
+  - "events"
+  - "treasury"
+  - "constitution"
+  - "venue-poly"
+  - "mark"
+  - "pledge"
+  - "haircut"
+  - "origination"
+  - "verify"
+  - "runtime"
+  - "scripts"
