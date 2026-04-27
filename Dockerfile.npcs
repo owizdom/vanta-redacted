@@ -1,0 +1,10 @@
+# Stub — filled in Phase 10 (Mineflayer headless bots: wizard + population per paper §7.4).
+FROM node:20.11.0-slim
+
+WORKDIR /app
+
+COPY npcs/package.json ./
+COPY npcs/src ./src
+
+# RUN npm install   # uncomment in Phase 10 once package.json has deps
+CMD ["node", "src/index.js"]

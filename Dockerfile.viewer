@@ -1,0 +1,17 @@
+# Stub — filled in Phase 10 (Mineflayer headless + prismarine-viewer browser spectator).
+FROM node:20.11.0-slim
+
+# Native deps for prismarine-viewer / canvas.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY viewer/package.json ./
+COPY viewer/src ./src
+
+# RUN npm install   # uncomment in Phase 10
+EXPOSE 8080 8081
+
+CMD ["node", "src/index.js"]
