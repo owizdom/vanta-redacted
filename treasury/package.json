@@ -1,0 +1,29 @@
+{
+  "name": "@vanta/treasury",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VANTA treasury: HKDF-derived secp256k1 wallet, ledger, schedule-gated outflow planner, invariant reconciler. Implements paper Invariant 6 (self-sustaining economics).",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@vanta/tee": "workspace:*",
+    "@vanta/events": "workspace:*",
+    "viem": "2.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}
