@@ -1,0 +1,28 @@
+{
+  "name": "@vanta/mark",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VANTA mark feed: Polymarket CLOB HTTP reader, TLS SPKI pinning, 30-minute time-weighted aggregator.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "lint": "eslint src tests",
+    "typecheck": "tsc --build --noEmit"
+  },
+  "dependencies": {
+    "@vanta/events": "workspace:*",
+    "@vanta/tee": "workspace:*",
+    "canonicalize": "3.0.0",
+    "viem": "2.22.0",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}
