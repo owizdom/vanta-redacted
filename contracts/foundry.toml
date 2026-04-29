@@ -1,0 +1,23 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+cache_path = "cache"
+libs = ["lib"]
+solc_version = "0.8.28"
+optimizer = true
+optimizer_runs = 200
+bytecode_hash = "none"
+fs_permissions = [
+  { access = "read", path = "../.vanta/dev-seed" },
+  { access = "read-write", path = "deployments" },
+]
+
+[rpc_endpoints]
+base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
+amoy = "${AMOY_RPC_URL}"
+
+[etherscan]
+base_sepolia = { key = "${ETHERSCAN_API_KEY}", chain = 84532 }
+amoy = { key = "${ETHERSCAN_API_KEY}", chain = 80002 }
