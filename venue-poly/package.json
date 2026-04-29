@@ -1,0 +1,26 @@
+{
+  "name": "@vanta/venue-poly",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VANTA venue bindings for Polymarket on Polygon Amoy: CTF ABI + typed read helpers, Gnosis Safe proxy interaction helper.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "lint": "eslint src tests",
+    "typecheck": "tsc --build --noEmit"
+  },
+  "dependencies": {
+    "@vanta/tee": "workspace:*",
+    "viem": "2.22.0",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0"
+  }
+}
