@@ -1,0 +1,31 @@
+{
+  "name": "@vanta/origination",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VANTA origination orchestrator: broadcasts LoanBook.originate(...) on Base Sepolia, waits for confirmation depth >= 2, then signs and persists a loan.origination event with the on-chain tx details embedded (post-image pattern).",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "lint": "eslint src tests",
+    "typecheck": "tsc --build --noEmit"
+  },
+  "dependencies": {
+    "@vanta/tee": "workspace:*",
+    "@vanta/events": "workspace:*",
+    "@vanta/haircut": "workspace:*",
+    "@vanta/pledge": "workspace:*",
+    "@vanta/treasury": "workspace:*",
+    "viem": "2.22.0",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@noble/ed25519": "2.3.0",
+    "@types/node": "^22.10.0"
+  }
+}
