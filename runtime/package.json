@@ -1,0 +1,41 @@
+{
+  "name": "@vanta/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VANTA runtime: boots TEE, opens event log, runs three continuous reasoning loops (credit, model, operational) per paper §7, exposes HTTP surface on fastify.",
+  "main": "./dist/main.js",
+  "exports": {
+    ".": "./dist/main.js"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "smoke": "tsx src/loops/smoke.ts",
+    "smoke:onboarding": "tsx src/onboarding/smoke.ts",
+    "build": "tsc -b",
+    "clean": "tsc -b --clean",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@vanta/tee": "workspace:*",
+    "@vanta/events": "workspace:*",
+    "@vanta/treasury": "workspace:*",
+    "@vanta/constitution": "workspace:*",
+    "@vanta/venue-poly": "workspace:*",
+    "@vanta/mark": "workspace:*",
+    "@vanta/pledge": "workspace:*",
+    "@vanta/haircut": "workspace:*",
+    "@vanta/origination": "workspace:*",
+    "@vanta/verify": "workspace:*",
+    "canonicalize": "3.0.0",
+    "fastify": "^5.2.0",
+    "fastify-type-provider-zod": "^3.0.0",
+    "viem": "2.22.0",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

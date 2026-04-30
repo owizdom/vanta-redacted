@@ -1,0 +1,20 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../tee" },
+    { "path": "../events" },
+    { "path": "../treasury" },
+    { "path": "../constitution" },
+    { "path": "../venue-poly" },
+    { "path": "../mark" },
+    { "path": "../pledge" },
+    { "path": "../haircut" },
+    { "path": "../origination" },
+    { "path": "../verify" }
+  ]
+}
