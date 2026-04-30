@@ -1,0 +1,34 @@
+{
+  "name": "@vanta/verify",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Third-party verifier CLI for VANTA: walks the event DAG from a starting event back to genesis, verifies every signature with @noble/ed25519 (zip215=false), and cross-checks loan.origination params_hash against the on-chain LoanBook.loans(loanId).paramsHash.",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": "./dist/src/index.js"
+  },
+  "bin": {
+    "vanta-verify": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc --build && node ./scripts/postbuild.cjs",
+    "clean": "tsc --build --clean",
+    "lint": "eslint src tests",
+    "typecheck": "tsc --build --noEmit"
+  },
+  "dependencies": {
+    "@noble/ed25519": "2.3.0",
+    "@noble/hashes": "1.8.0",
+    "@vanta/events": "workspace:*",
+    "@vanta/tee": "workspace:*",
+    "commander": "^13.1.0",
+    "viem": "2.22.0",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2"
+  }
+}
