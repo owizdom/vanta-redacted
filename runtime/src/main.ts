@@ -54,9 +54,10 @@ import {
   createOperationalLoop,
   type OperationalSnapshot,
 } from "./loops/operational.js";
-import { createOnboardingLoop } from "./onboarding/index.js";
+import { createOnboardingLoop, createGatewayJudge, type JudgeFn } from "./onboarding/index.js";
 import type { CandidateInputs } from "./onboarding/types.js";
 import type { ExposureSnapshot } from "./onboarding/reasoning.js";
+import { buildCandidateBatch } from "./services/candidate-feed.js";
 import type { EventSink, LoopContext, ReasoningLoop } from "./loops/types.js";
 
 // Mirrors @vanta/treasury constants (not imported to avoid bumping
@@ -179,7 +180,7 @@ async function stubOperationalSnapshot(): Promise<OperationalSnapshot> {
   };
 }
 
-async function stubFetchCandidates(): Promise<readonly CandidateInputs[]> {
+async function emptyCandidates(): Promise<readonly CandidateInputs[]> {
   return [];
 }
 
@@ -223,16 +224,18 @@ async function startMain(): Promise<void> {
 
   const quotePriceUsdc6 = BigInt(Math.round(config.x402.quotePriceUsdc * 1_000_000));
   const markPriceUsdc6 = BigInt(Math.round(config.x402.markPriceUsdc * 1_000_000));
+  // Paths must match the routes registered in `services.ts` for the
+  // x402 hook (which inspects `req.routerPath`) to pick them up.
   const meteredRoutes: X402RouteConfig[] = [
     {
-      path: "/api/services/quote",
+      path: "/bridge/wizard/quote",
       method: "POST",
       priceUsdc6: quotePriceUsdc6,
       description:
         "VANTA quote — signed haircut + max-loan for a Polymarket position",
     },
     {
-      path: "/api/services/mark/:market_id",
+      path: "/mark/:market_id",
       method: "GET",
       priceUsdc6: markPriceUsdc6,
       description: "VANTA mark — signed Polymarket TWAP read for a market",
@@ -338,10 +341,44 @@ async function startMain(): Promise<void> {
   });
 
   // ----- Onboarding cycle (paper §6) -------------------------------------
+  // Real Polymarket questions go through the LLM judge → resolution-
+  // criteria clarity score → gate floor + agent reasoning → signed
+  // `loop.onboard_decision` + sibling `reasoning.trace`. The gateway
+  // judge is wired iff AI_GATEWAY_BASE_URL + AI_GATEWAY_API_KEY are set;
+  // otherwise the deterministic stub keeps the loop honest in offline
+  // mode.
+  const judge: JudgeFn | undefined =
+    config.inference.gatewayBaseUrl.length > 0 && config.inference.gatewayApiKey.length > 0
+      ? createGatewayJudge({
+          call: async (req) => {
+            const r = await boot.inference.call({
+              role: req.role,
+              system: req.system,
+              messages: req.messages,
+              maxTokens: req.maxTokens,
+              temperature: req.temperature,
+            });
+            return { text: r.text, model: r.model, latencyMs: r.latencyMs };
+          },
+        })
+      : undefined;
+  if (judge !== undefined) {
+    app.log.info("onboarding: using gateway-backed LLM judge");
+  } else {
+    app.log.info("onboarding: AI gateway unset, using deterministic stub judge");
+  }
+
+  const fetchCandidates = (): Promise<readonly CandidateInputs[]> =>
+    Promise.resolve(buildCandidateBatch(boot.marketsCache, 3));
+
+  // Empty fetcher fallback used only by the unit-tested smoke entrypoint.
+  void emptyCandidates;
+
   const onboardingLoop = createOnboardingLoop({
     ctx,
-    fetchCandidates: stubFetchCandidates,
+    fetchCandidates,
     fetchExposure: stubFetchExposure,
+    judge,
     tickSeconds: 6 * 60 * 60,
   });
 

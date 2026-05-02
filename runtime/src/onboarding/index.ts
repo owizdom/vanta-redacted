@@ -22,6 +22,7 @@ export { reason, inputsHash } from "./reasoning.js";
 export type { ExposureSnapshot } from "./reasoning.js";
 
 export {
+  createGatewayJudge,
   stubDeterministicJudge,
   RESOLUTION_CLARITY_PROMPT,
   RESOLUTION_CLARITY_PROMPT_HASH,
