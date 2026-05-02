@@ -41,6 +41,17 @@ export interface MarketSnapshot {
   readonly polymarketSlug: string | null;
   /** Stable label of the position holder if any; null for watched-only. */
   readonly ownerLabel: string | null;
+  // ---- Polymarket gamma-api enrichment (refreshed on metadata cadence) ----
+  /** All-time USD volume traded. */
+  readonly volumeUsd: number | null;
+  /** Trailing 24h USD volume. */
+  readonly volume24hUsd: number | null;
+  /** Pool USD liquidity (Polymarket TVL on this market). */
+  readonly liquidityUsd: number | null;
+  /** YES price 24h ago vs now, decimal (e.g. +0.012 = +1.2¢). */
+  readonly oneDayPriceChange: number | null;
+  /** ISO end date string (e.g. 2028-11-07). */
+  readonly endDateIso: string | null;
 }
 
 export interface MarketsCache {
@@ -65,7 +76,52 @@ const blankSnapshot = (cid: Sha256Hex, slug: string | null, owner: string | null
   lastError: null,
   polymarketSlug: slug,
   ownerLabel: owner,
+  volumeUsd: null,
+  volume24hUsd: null,
+  liquidityUsd: null,
+  oneDayPriceChange: null,
+  endDateIso: null,
 });
+
+const GAMMA_BASE = "https://gamma-api.polymarket.com";
+
+interface GammaMarket {
+  readonly conditionId?: string;
+  readonly volumeNum?: number;
+  readonly volume24hr?: number;
+  readonly liquidityNum?: number;
+  readonly oneDayPriceChange?: number;
+  readonly endDateIso?: string;
+}
+
+async function fetchGammaBatch(
+  cids: readonly Sha256Hex[],
+): Promise<Map<string, GammaMarket>> {
+  const out = new Map<string, GammaMarket>();
+  if (cids.length === 0) return out;
+  // gamma accepts repeated condition_ids query params — chunk to avoid URL-length limits.
+  const chunks: Sha256Hex[][] = [];
+  for (let i = 0; i < cids.length; i += 10) chunks.push(cids.slice(i, i + 10) as Sha256Hex[]);
+  for (const chunk of chunks) {
+    const url =
+      `${GAMMA_BASE}/markets?` +
+      chunk.map((c) => `condition_ids=0x${c}`).join("&");
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (!r.ok) continue;
+      const arr = (await r.json()) as ReadonlyArray<GammaMarket>;
+      for (const m of arr) {
+        const cid = m.conditionId !== undefined
+          ? m.conditionId.replace(/^0x/, "").toLowerCase()
+          : null;
+        if (cid !== null) out.set(cid, m);
+      }
+    } catch {
+      // gamma is best-effort; if it fails we keep prior values on the snapshot.
+    }
+  }
+  return out;
+}
 
 /** Static map of cid → {slug, ownerLabel} drawn from watched-markets. */
 function buildContextMap(): Map<string, { slug: string | null; ownerLabel: string | null }> {
@@ -98,6 +154,7 @@ export function createMarketsCache(): MarketsCache {
   let midpointTimer: ReturnType<typeof setInterval> | null = null;
 
   async function refreshMetadata(): Promise<void> {
+    // 1) Per-cid CLOB metadata (question text + tokens).
     for (const cid of watched) {
       try {
         const result = await fetchMarket(cid);
@@ -127,6 +184,22 @@ export function createMarketsCache(): MarketsCache {
           });
         }
       }
+    }
+
+    // 2) Batched gamma-api enrichment (volume / liquidity / 24h change / end date).
+    //    Best-effort: if it 5xxs we keep the prior snapshot's enrichment.
+    const gamma = await fetchGammaBatch(watched);
+    for (const [cid, g] of gamma.entries()) {
+      const prev = cache.get(cid as Sha256Hex);
+      if (prev === undefined) continue;
+      cache.set(cid as Sha256Hex, {
+        ...prev,
+        volumeUsd: g.volumeNum ?? prev.volumeUsd,
+        volume24hUsd: g.volume24hr ?? prev.volume24hUsd,
+        liquidityUsd: g.liquidityNum ?? prev.liquidityUsd,
+        oneDayPriceChange: g.oneDayPriceChange ?? prev.oneDayPriceChange,
+        endDateIso: g.endDateIso ?? prev.endDateIso,
+      });
     }
   }
 

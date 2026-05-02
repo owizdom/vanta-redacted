@@ -95,6 +95,11 @@ function serializeMarket(s: MarketSnapshot): Record<string, unknown> {
     owner_label: s.ownerLabel,
     short_name: shortName,
     owner_side: ownerSide,
+    volume_usd: s.volumeUsd,
+    volume_24h_usd: s.volume24hUsd,
+    liquidity_usd: s.liquidityUsd,
+    one_day_price_change: s.oneDayPriceChange,
+    end_date_iso: s.endDateIso,
   };
 }
 
