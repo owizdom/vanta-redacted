@@ -74,6 +74,24 @@ const RawConfig = z.object({
   INFERENCE_MODEL_ANTHROPIC: z.string().default("anthropic/claude-sonnet-4-6"),
   INFERENCE_MODEL_OPENAI: z.string().default("openai/gpt-5"),
   INFERENCE_MODEL_GOOGLE: z.string().default("google/gemini-2.5-pro"),
+  // Eigen Gateway base URL. The provider's default is the dev gateway;
+  // we wire it through config so a single env flip overrides per deploy.
+  EIGEN_GATEWAY_URL: z
+    .string()
+    .url()
+    .default("https://ai-gateway-dev.eigencloud.xyz"),
+  // JWT audience. The upstream `eigen()` singleton hardcodes
+  // `'llm-proxy'` (provider/dist/index.js:94). Our deployment hits a
+  // crypto/rsa verification error against that audience while the same
+  // KMS happily mints externally-verified `vanta.app` JWTs at boot —
+  // so we override to `vanta.app` and surface the choice as config.
+  INFERENCE_AUDIENCE: z.string().default("vanta.app"),
+  // When true, the eigen provider logs request URL + redacted headers +
+  // body via console.log. Off by default; flip on for diagnosis.
+  INFERENCE_DEBUG: z.coerce.boolean().default(false),
+  // Force a static JWT for the gateway (bypasses AttestClient entirely).
+  // Diagnostic-only; if set, the provider uses it verbatim.
+  INFERENCE_STATIC_JWT: z.string().default(""),
   // ----- X402 metering (paper §8 / EigenCloud Service-Agent affordance) ---
   // When false (default for local Docker compose), the metered routes
   // pass through unmetered. Production / preview deployments flip this
@@ -145,6 +163,10 @@ export interface InferenceModelSlugs {
 
 export interface InferenceConfig {
   readonly models: InferenceModelSlugs;
+  readonly eigenGatewayUrl: string;
+  readonly audience: string;
+  readonly debug: boolean;
+  readonly staticJwt: string;
 }
 
 export interface X402Config {
@@ -302,6 +324,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
         openai: raw.INFERENCE_MODEL_OPENAI,
         google: raw.INFERENCE_MODEL_GOOGLE,
       },
+      eigenGatewayUrl: raw.EIGEN_GATEWAY_URL,
+      audience: raw.INFERENCE_AUDIENCE,
+      debug: raw.INFERENCE_DEBUG,
+      staticJwt: raw.INFERENCE_STATIC_JWT,
     },
     x402: {
       enabled: raw.X402_ENABLED,

@@ -47,6 +47,7 @@ import { registerHealthRoute } from "./http/routes/health.js";
 import { registerMarketsRoutes } from "./http/routes/markets.js";
 import { registerServiceRoutes } from "./http/routes/services.js";
 import { registerStateRoute } from "./http/routes/state.js";
+import { registerDevProbeRoute } from "./http/routes/dev-probe.js";
 import { createMarkLoop } from "./services/mark-loop.js";
 import {
   createOperationalReader,
@@ -232,6 +233,7 @@ async function startMain(): Promise<void> {
   await registerSettleRoute(app);
   await registerMarketsRoutes(app, { marketsCache: boot.marketsCache });
   await registerHealthRoute(app, { bootstrap: boot });
+  await registerDevProbeRoute(app);
 
   const quotePriceUsdc6 = BigInt(Math.round(config.x402.quotePriceUsdc * 1_000_000));
   const markPriceUsdc6 = BigInt(Math.round(config.x402.markPriceUsdc * 1_000_000));

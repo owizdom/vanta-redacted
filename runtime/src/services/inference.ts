@@ -4,13 +4,13 @@
  * signed `op.inference` event in VANTA's event log — the request hash,
  * response hash, and inline excerpt are part of the immutable record.
  *
- * One backend: Vercel AI Gateway (OpenAI-compatible chat-completions
- * surface). All providers — Anthropic, OpenAI, Google — go through it
- * so the audit trail is uniform and the per-call accounting lives in
- * one place. The previous direct-OAuth path against api.anthropic.com
- * was removed: long-lived `sk-ant-oat01-…` tokens minted by `claude
- * setup-token` are only honoured by the `claude` CLI subprocess, not
- * by raw HTTP to the messages endpoint.
+ * One backend: EigenCloud Eigen Gateway via @layr-labs/ai-gateway-provider
+ * (OpenAI-compatible chat-completions surface). All providers — Anthropic,
+ * OpenAI, Google — go through it so the audit trail is uniform and per-
+ * call accounting lives in one place. Auth is per-call JWT minted via
+ * TEE attestation against KMS_SERVER_URL + KMS_PUBLIC_KEY (auto-injected
+ * inside EigenCompute); billed to the agent's own EigenCompute account.
+ * No bearer tokens, no operator-held keys.
  *
  * The provider for `researcher` / `evaluator` / `adversary` rotates
  * deterministically per UTC day so the three roles never share the
@@ -44,10 +44,15 @@ import {
   type VantaEvent,
 } from "@vanta/events";
 import { asSha256Hex } from "@vanta/tee";
-import { eigen } from "@layr-labs/ai-gateway-provider";
+import {
+  createEigenGateway,
+  type EigenGatewayLanguageModel,
+} from "@layr-labs/ai-gateway-provider";
 import { generateText } from "ai";
 
 import type { InferenceConfig } from "../config.js";
+
+type EigenProviderFn = (modelId: string) => EigenGatewayLanguageModel;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -189,6 +194,7 @@ export function createInferenceClient(
 ): InferenceClient {
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch;
   const now = opts.nowMs ?? Date.now;
+  const eigenProvider = buildEigenProvider(opts.config);
 
   return {
     async call(req: InferenceRequest): Promise<InferenceResponse> {
@@ -203,7 +209,7 @@ export function createInferenceClient(
       if (backend === null) {
         throw new InferenceError(
           "no_credentials",
-          "no inference backend available; set AI_GATEWAY_BASE_URL + AI_GATEWAY_API_KEY",
+          "no inference backend available; KMS_SERVER_URL + KMS_PUBLIC_KEY (or INFERENCE_STATIC_JWT) required",
           { provider, role: req.role },
         );
       }
@@ -235,6 +241,7 @@ export function createInferenceClient(
           maxTokens: req.maxTokens ?? 1024,
           temperature: req.temperature ?? 0,
           fetchImpl,
+          eigenProvider,
         });
       } catch (err: unknown) {
         if (err instanceof InferenceError) throw err;
@@ -345,18 +352,57 @@ interface BackendChoice {
   readonly kind: "eigen";
 }
 
-function chooseBackend(_cfg: InferenceConfig): BackendChoice | null {
+function chooseBackend(cfg: InferenceConfig): BackendChoice | null {
   const kmsServerURL = process.env["KMS_SERVER_URL"];
   const kmsPublicKey = process.env["KMS_PUBLIC_KEY"];
-  const jwtOverride = process.env["KMS_AUTH_JWT"];
+  const envJwtOverride = process.env["KMS_AUTH_JWT"];
+  const cfgStaticJwt = cfg.staticJwt;
   if (
     (typeof kmsServerURL === "string" && kmsServerURL.length > 0 &&
       typeof kmsPublicKey === "string" && kmsPublicKey.length > 0) ||
-    (typeof jwtOverride === "string" && jwtOverride.length > 0)
+    (typeof envJwtOverride === "string" && envJwtOverride.length > 0) ||
+    cfgStaticJwt.length > 0
   ) {
     return { kind: "eigen" };
   }
   return null;
+}
+
+/**
+ * Build the eigen-gateway provider once per inference client. Audience,
+ * gateway URL, debug, and static-JWT override all flow through config —
+ * no env reads, no upstream singleton. The upstream `eigen()` singleton
+ * hardcodes audience `'llm-proxy'`, which our deployment fails RSA
+ * verification against; the same KMS happily mints externally-verified
+ * `vanta.app` JWTs at boot.
+ *
+ * Returns a thin wrapper so call sites stay `eigenProvider(modelId)`.
+ */
+function buildEigenProvider(cfg: InferenceConfig): EigenProviderFn {
+  const kmsServerURL = process.env["KMS_SERVER_URL"] ?? "";
+  const kmsPublicKey = process.env["KMS_PUBLIC_KEY"] ?? "";
+  const envStaticJwt = process.env["KMS_AUTH_JWT"] ?? "";
+
+  const staticJwt =
+    cfg.staticJwt.length > 0
+      ? cfg.staticJwt
+      : envStaticJwt.length > 0
+        ? envStaticJwt
+        : undefined;
+
+  const attestConfig =
+    staticJwt === undefined && kmsServerURL.length > 0 && kmsPublicKey.length > 0
+      ? { kmsServerURL, kmsPublicKey, audience: cfg.audience }
+      : undefined;
+
+  const provider = createEigenGateway({
+    baseURL: cfg.eigenGatewayUrl,
+    debug: cfg.debug,
+    ...(staticJwt !== undefined ? { jwt: staticJwt } : {}),
+    ...(attestConfig !== undefined ? { attestConfig } : {}),
+  });
+
+  return (modelId: string) => provider(modelId);
 }
 
 // ---------------------------------------------------------------------------
@@ -379,6 +425,7 @@ interface InvokeArgs {
   readonly temperature: number;
   /** Retained for symmetry; the eigen provider has its own internal fetch. */
   readonly fetchImpl: typeof fetch;
+  readonly eigenProvider: EigenProviderFn;
 }
 
 async function invokeBackend(args: InvokeArgs): Promise<ProviderCallResult> {
@@ -405,7 +452,7 @@ async function invokeEigenGateway(args: InvokeArgs): Promise<ProviderCallResult>
 
   try {
     const result = await generateText({
-      model: eigen(args.model),
+      model: args.eigenProvider(args.model),
       messages,
       maxOutputTokens: args.maxTokens,
       temperature: args.temperature,
