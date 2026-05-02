@@ -1,5 +1,6 @@
 "use client";
 
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import {
   createContext,
   useCallback,
@@ -9,6 +10,8 @@ import {
   useState,
 } from "react";
 import { useAccount, useDisconnect } from "wagmi";
+
+import { setDemoBridge, DEMO_ADDRESS } from "./wallets/demo-bridge";
 
 export type WalletMode = "real" | "demo";
 
@@ -23,6 +26,14 @@ export interface DemoPosition {
   readonly originatedAt: number;
 }
 
+/**
+ * Public wallet API consumed across the app. Both real (wagmi) and
+ * synthetic (demo) sessions resolve into the same shape.
+ *
+ * Invariant: any future `useAccount()` / `useBalance()` consumer must
+ * gate on `connector?.id !== 'vanta-demo'` before assuming a provider
+ * exists — the demo connector returns no provider and never RPCs.
+ */
 export interface WalletApi {
   readonly connected: boolean;
   readonly mode: WalletMode | null;
@@ -35,11 +46,9 @@ export interface WalletApi {
   readonly borrowedUsdc: number;
   /** Synthetic positions for demo mode; empty for real (real ones come from on-chain). */
   readonly positions: readonly DemoPosition[];
-  /** Modal control. */
-  readonly connectModalOpen: boolean;
+  /** Open the RainbowKit connect modal. */
   readonly openConnect: () => void;
-  readonly closeConnect: () => void;
-  /** Activate the synthetic demo wallet. */
+  /** Activate the synthetic demo wallet (also fired by the demo connector). */
   readonly enterDemo: () => void;
   /** Disconnect both real + demo. */
   readonly disconnect: () => void;
@@ -54,7 +63,6 @@ interface DemoState {
   readonly positions: readonly DemoPosition[];
 }
 
-const DEMO_ADDRESS = "0xDEM00000c0a8AeD1dc9aC1bA2a31eD8DEM00DEAD" as const;
 const DEMO_INIT: DemoState = {
   balanceUsdc: 5_000,
   pledgedUsdc: 0,
@@ -63,6 +71,7 @@ const DEMO_INIT: DemoState = {
 };
 
 const STORAGE_KEY = "vanta-demo-v1";
+const DEMO_CONNECTOR_ID = "vanta-demo";
 
 function readDemo(): DemoState | null {
   if (typeof window === "undefined") return null;
@@ -93,9 +102,9 @@ export function WalletProvider({
 }): JSX.Element {
   const wagmi = useAccount();
   const { disconnect: wagmiDisconnect } = useDisconnect();
+  const { openConnectModal } = useConnectModal();
 
   const [demo, setDemo] = useState<DemoState | null>(null);
-  const [connectModalOpen, setConnectModalOpen] = useState(false);
 
   // Hydrate demo from localStorage once.
   useEffect(() => {
@@ -108,19 +117,40 @@ export function WalletProvider({
     writeDemo(demo);
   }, [demo]);
 
-  // Real-wallet connection wins; demo is only "active" if wagmi isn't connected.
-  const realConnected = wagmi.isConnected && wagmi.address !== undefined;
+  // The demo connector is registered with wagmi/RainbowKit, so when a
+  // user clicks "Demo account" in the picker, wagmi reports it as
+  // connected with the synthetic address. Exclude it from
+  // `realConnected` so demo state doesn't masquerade as a real wallet.
+  const realConnected =
+    wagmi.isConnected &&
+    wagmi.address !== undefined &&
+    wagmi.connector?.id !== DEMO_CONNECTOR_ID;
+
   const demoActive = demo !== null && !realConnected;
 
   const enterDemo = useCallback((): void => {
     setDemo(DEMO_INIT);
-    setConnectModalOpen(false);
   }, []);
 
   const disconnect = useCallback((): void => {
-    if (realConnected) wagmiDisconnect();
+    // Tear down whichever connector is active (covers both the real
+    // wallet and the demo connector — wagmi's `disconnect` no-ops if
+    // there's no active connection).
+    wagmiDisconnect();
     setDemo(null);
-  }, [realConnected, wagmiDisconnect]);
+  }, [wagmiDisconnect]);
+
+  // Bridge: the demo connector lives outside React, so it can't call
+  // into context. Register the trigger callbacks for the lifetime of
+  // this provider instance.
+  useEffect(() => {
+    setDemoBridge({ enterDemo, disconnectDemo: () => setDemo(null) });
+    return () => setDemoBridge(null);
+  }, [enterDemo]);
+
+  const openConnect = useCallback((): void => {
+    openConnectModal?.();
+  }, [openConnectModal]);
 
   const addDemoPledge = useCallback(
     (p: Omit<DemoPosition, "originatedAt">): void => {
@@ -148,9 +178,7 @@ export function WalletProvider({
         pledgedUsdc: 0,
         borrowedUsdc: 0,
         positions: [],
-        connectModalOpen,
-        openConnect: () => setConnectModalOpen(true),
-        closeConnect: () => setConnectModalOpen(false),
+        openConnect,
         enterDemo,
         disconnect,
         addDemoPledge,
@@ -165,9 +193,7 @@ export function WalletProvider({
         pledgedUsdc: demo.pledgedUsdc,
         borrowedUsdc: demo.borrowedUsdc,
         positions: demo.positions,
-        connectModalOpen,
-        openConnect: () => setConnectModalOpen(true),
-        closeConnect: () => setConnectModalOpen(false),
+        openConnect,
         enterDemo,
         disconnect,
         addDemoPledge,
@@ -181,9 +207,7 @@ export function WalletProvider({
       pledgedUsdc: 0,
       borrowedUsdc: 0,
       positions: [],
-      connectModalOpen,
-      openConnect: () => setConnectModalOpen(true),
-      closeConnect: () => setConnectModalOpen(false),
+      openConnect,
       enterDemo,
       disconnect,
       addDemoPledge,
@@ -193,7 +217,7 @@ export function WalletProvider({
     wagmi.address,
     demoActive,
     demo,
-    connectModalOpen,
+    openConnect,
     enterDemo,
     disconnect,
     addDemoPledge,
