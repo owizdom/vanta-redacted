@@ -30,6 +30,13 @@ export default function Home(): JSX.Element {
                 Open the app
               </Link>
             </div>
+
+            <div className="mt-10 flex justify-center">
+              <span className="inline-flex items-center gap-2 rounded-full border border-ink-800 bg-ink-900/60 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.22em] text-chalk-400">
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+                Built on EigenCloud
+              </span>
+            </div>
           </div>
         </section>
 
