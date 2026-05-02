@@ -27,16 +27,16 @@ const EIGEN_APP_ID = "0xaa4875Ff1514b8227Dc61466473c0B1E4C83CAf9" as const;
 // link; not part of `all_match` since the runtime's publicClient is
 // Base-Sepolia-only and we don't read its owner here. The address is
 // pinned for the launcher's polygonscan link target.
-const VANTA_VAULT_AMOY_ADDRESS = "0xD9AFC3abC151239B047F653e0493792ecEB0f076" as const;
+const VANTA_VAULT_AMOY_ADDRESS = "0x68f57D4F531fBbbd319F42Ca94964C0d3FbC063a" as const;
 
 // Production-deployed enclave EOA + contracts. Used to compute the
 // local-vs-prod banner state — when SKIP_CONTRACT_CHECKS=1 + dev-seed
 // derives a different address, the laptop demo is HONEST about being
 // local instead of saying "on-chain owner reads pending" which sounds
 // like the runtime is broken.
-const PROD_TEE_ADDRESS = "0x8275001D7618263304B76Ed621150cE4193826e6" as const;
-const PROD_LP_VAULT = "0xD9AFC3abC151239B047F653e0493792ecEB0f076" as const;
-const PROD_LOAN_BOOK = "0xA6004cb25ce50baEDa38017B81577FA2419a876f" as const;
+const PROD_TEE_ADDRESS = "0x54b52EcEECfbe9a82B821Bb20A0dDcb130cb4AD2" as const;
+const PROD_LP_VAULT = "0x68f57D4F531fBbbd319F42Ca94964C0d3FbC063a" as const;
+const PROD_LOAN_BOOK = "0x1008750145a24101Dda29F1176a0529662500024" as const;
 
 export async function registerIdentityRoute(app: FastifyInstance): Promise<void> {
   app.get("/api/identity-pin", async () => {

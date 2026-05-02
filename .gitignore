@@ -26,6 +26,7 @@ vendor/
 # Environment
 .env
 .env.local
+.deployer-wallet.txt
 
 # LaTeX artifacts
 *.aux
