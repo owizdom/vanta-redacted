@@ -331,8 +331,8 @@ function ListView({
 }): JSX.Element {
   const router = useRouter();
   return (
-    <div className="overflow-hidden rounded-b-2xl border-x border-b border-ink-800">
-      <table className="w-full text-sm">
+    <div className="overflow-x-auto rounded-b-2xl border-x border-b border-ink-800">
+      <table className="w-full min-w-[920px] text-sm">
         <thead className="text-left">
           <tr className="border-b border-ink-800 bg-ink-900/40 text-[11px] uppercase tracking-[0.16em] text-chalk-400">
             <th className="w-10 px-3 py-3" />
@@ -340,16 +340,16 @@ function ListView({
             <th className="px-4 py-3 font-mono font-normal">
               <SortHeader label="Mid" k="mid" sort={sort} onSort={onSort} />
             </th>
-            <th className="px-4 py-3 font-mono font-normal">
+            <th className="hidden px-4 py-3 font-mono font-normal lg:table-cell">
               <SortHeader label="Volume" k="volume" sort={sort} onSort={onSort} />
             </th>
-            <th className="px-4 py-3 font-mono font-normal">
+            <th className="hidden px-4 py-3 font-mono font-normal lg:table-cell">
               <SortHeader label="TVL" k="tvl" sort={sort} onSort={onSort} />
             </th>
-            <th className="px-4 py-3 font-mono font-normal">
+            <th className="hidden px-4 py-3 font-mono font-normal md:table-cell">
               <SortHeader label="24hr ch%" k="delta" sort={sort} onSort={onSort} />
             </th>
-            <th className="px-4 py-3 font-mono font-normal">
+            <th className="hidden px-4 py-3 font-mono font-normal lg:table-cell">
               <SortHeader label="Resolves" k="autoClose" sort={sort} onSort={onSort} />
             </th>
             <th className="px-4 py-3 text-right font-mono font-normal">Action</th>
@@ -409,12 +409,14 @@ function ListView({
                     <span className="font-display text-lg font-semibold">{m.midCents}¢</span>
                   </div>
                 </td>
-                <td className="px-4 py-4 font-mono text-chalk-200">
+                <td className="hidden px-4 py-4 font-mono text-chalk-200 lg:table-cell">
                   ${formatK(m.volume24h)}
                 </td>
-                <td className="px-4 py-4 font-mono text-chalk-200">${formatK(m.tvl)}</td>
+                <td className="hidden px-4 py-4 font-mono text-chalk-200 lg:table-cell">
+                  ${formatK(m.tvl)}
+                </td>
                 <td
-                  className={`px-4 py-4 font-mono ${
+                  className={`hidden px-4 py-4 font-mono md:table-cell ${
                     m.delta24h === 0
                       ? "text-chalk-400"
                       : isUp
@@ -426,7 +428,7 @@ function ListView({
                     ? "—"
                     : `${isUp ? "+" : ""}${m.delta24h.toFixed(2)}%`}
                 </td>
-                <td className="px-4 py-4 text-violet-300 underline-offset-2 hover:underline">
+                <td className="hidden px-4 py-4 text-violet-300 underline-offset-2 hover:underline lg:table-cell">
                   {m.autoCloseLabel}
                 </td>
                 <td className="px-4 py-4">
@@ -434,14 +436,14 @@ function ListView({
                     <Link
                       href={`/app/trade/${m.conditionId}?side=YES`}
                       onClick={(e) => e.stopPropagation()}
-                      className="rounded-md border border-ink-700 bg-ink-900 px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-chalk-50 transition hover:border-violet-500 hover:text-violet-300"
+                      className="rounded-md border border-ink-700 bg-ink-900 px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-chalk-50 transition hover:border-violet-500 hover:text-violet-300"
                     >
-                      Pledge YES
+                      YES
                     </Link>
                     <Link
                       href={`/app/trade/${m.conditionId}?side=NO`}
                       onClick={(e) => e.stopPropagation()}
-                      className="rounded-md border border-ink-700 bg-ink-900 px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-chalk-50 transition hover:border-violet-500 hover:text-violet-300"
+                      className="rounded-md border border-ink-700 bg-ink-900 px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-chalk-50 transition hover:border-violet-500 hover:text-violet-300"
                     >
                       NO
                     </Link>
