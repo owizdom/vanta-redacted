@@ -5,8 +5,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { fmtUsdc, shortAddress, useWallet } from "@/lib/wallet";
 
-import { AgentChip } from "./agent-chip";
 import { AppFooter } from "./app-footer";
+import { MadeSovereignWith } from "./made-sovereign-with";
 import { openWelcomeModal, WelcomeModal } from "./welcome-modal";
 
 export function AppShell({ children }: { readonly children: React.ReactNode }): JSX.Element {
@@ -70,8 +70,8 @@ function TopNav(): JSX.Element {
           </nav>
         </div>
 
-        <div className="flex items-center gap-2">
-          <AgentChip />
+        <div className="flex items-center gap-4">
+          <MadeSovereignWith />
 
           {wallet.connected ? (
             <>
