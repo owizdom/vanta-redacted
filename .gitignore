@@ -12,11 +12,15 @@ out/
 contracts/out/
 contracts/cache/
 contracts/broadcast/
+contracts/deployments/
 
 # Local data
 .vanta/
 vanta-data/
 vendor/
+
+# Pre-redaction backup of .git (created by scrub script)
+.git.bak-pre-redacted/
 
 # Environment
 .env
