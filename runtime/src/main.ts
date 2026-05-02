@@ -45,6 +45,7 @@ import { registerSettleRoute } from "./http/routes/settle.js";
 import { registerHealthRoute } from "./http/routes/health.js";
 import { registerMarketsRoutes } from "./http/routes/markets.js";
 import { registerServiceRoutes } from "./http/routes/services.js";
+import { registerStateRoute } from "./http/routes/state.js";
 import { createMarkLoop } from "./services/mark-loop.js";
 import { installX402Hook, type X402RouteConfig } from "./services/x402.js";
 
@@ -302,25 +303,10 @@ async function startMain(): Promise<void> {
     metered: config.x402.enabled,
   });
 
-  await app.listen({ port: config.port, host: config.host });
-  console.log(
-    `VANTA alive on http://${config.host}:${String(config.port)} (origination=${boot.origination.address})`,
-  );
-
-  // ----- Mark loop. One @vanta/mark.createMarkPoller per active loan. -----
-  const markLoop = createMarkLoop({
-    bootstrap: boot,
-    registry: boot.loanRegistry,
-    fetchTrades,
-    fetchMarket,
-    tickSeconds: config.markTickSeconds,
-  });
-  markLoop.start();
-
-  boot.agentState.start();
-  boot.marketsCache.start();
-
   // ----- Three continuous reasoning loops (paper §7) ---------------------
+  // Construct the loops BEFORE app.listen so we can bind their refs
+  // into the state route registration; loops are start()-ed later so
+  // ticks only fire once the HTTP surface is alive.
   const ctx: LoopContext = buildLoopContext(boot, amoyClient);
 
   const creditLoop = createCreditLoop({
@@ -381,6 +367,38 @@ async function startMain(): Promise<void> {
     judge,
     tickSeconds: 6 * 60 * 60,
   });
+
+  // State aggregator route (must register before listen so fastify is
+  // still mutable; route closure binds the live loop refs).
+  await registerStateRoute(app, {
+    marketsCache: boot.marketsCache,
+    loanRegistry: boot.loanRegistry,
+    log: boot.log,
+    loops: {
+      credit: creditLoop,
+      model: modelLoop,
+      operational: operationalLoop,
+      onboarding: onboardingLoop,
+    },
+  });
+
+  await app.listen({ port: config.port, host: config.host });
+  console.log(
+    `VANTA alive on http://${config.host}:${String(config.port)} (origination=${boot.origination.address})`,
+  );
+
+  // ----- Mark loop. One @vanta/mark.createMarkPoller per active loan. -----
+  const markLoop = createMarkLoop({
+    bootstrap: boot,
+    registry: boot.loanRegistry,
+    fetchTrades,
+    fetchMarket,
+    tickSeconds: config.markTickSeconds,
+  });
+  markLoop.start();
+
+  boot.agentState.start();
+  boot.marketsCache.start();
 
   const reasoningLoops: readonly ReasoningLoop[] = [
     creditLoop,

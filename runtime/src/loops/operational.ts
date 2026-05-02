@@ -285,6 +285,7 @@ export function createOperationalLoop(args: OperationalLoopArgs): ReasoningLoop 
   const sleep = args.sleepMs ?? realSleep;
   let stopping = false;
   let inFlight: Promise<void> = Promise.resolve();
+  let lastTickAt: number | null = null;
 
   const runTick = async (): Promise<void> => {
     try {
@@ -308,6 +309,7 @@ export function createOperationalLoop(args: OperationalLoopArgs): ReasoningLoop 
         }`,
       );
     }
+    lastTickAt = args.ctx.clock.nowMs();
   };
 
   const start = (): void => {
@@ -331,5 +333,7 @@ export function createOperationalLoop(args: OperationalLoopArgs): ReasoningLoop 
     start,
     stop,
     runTick,
+    lastTickAtMs: () => lastTickAt,
+    tickIntervalMs: tickMs,
   };
 }

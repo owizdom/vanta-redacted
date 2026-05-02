@@ -279,11 +279,15 @@ export function createModelLoop(args: ModelLoopArgs): ReasoningLoop {
   const sleep = args.sleepMs ?? realSleep;
   let stopping = false;
   let inFlight: Promise<void> = Promise.resolve();
+  let lastTickAt: number | null = null;
 
   const runTick = async (): Promise<void> => {
     try {
       const { rows, dataset_hash } = await args.fetchDataset();
-      if (rows.length === 0) return;
+      if (rows.length === 0) {
+        lastTickAt = args.ctx.clock.nowMs();
+        return;
+      }
       const replay = runReplay(rows);
       const proposed = proposeParams(replay);
       await emitProposal({
@@ -302,6 +306,7 @@ export function createModelLoop(args: ModelLoopArgs): ReasoningLoop {
         }`,
       );
     }
+    lastTickAt = args.ctx.clock.nowMs();
   };
 
   const start = (): void => {
@@ -325,5 +330,7 @@ export function createModelLoop(args: ModelLoopArgs): ReasoningLoop {
     start,
     stop,
     runTick,
+    lastTickAtMs: () => lastTickAt,
+    tickIntervalMs: tickMs,
   };
 }

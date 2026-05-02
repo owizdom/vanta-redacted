@@ -296,11 +296,15 @@ export function createOnboardingLoop(args: OnboardingLoopArgs): ReasoningLoop {
   const window = new OnboardWindow();
   let stopping = false;
   let inFlight: Promise<void> = Promise.resolve();
+  let lastTickAt: number | null = null;
 
   const runTick = async (): Promise<void> => {
     try {
       const candidates = await args.fetchCandidates();
-      if (candidates.length === 0) return;
+      if (candidates.length === 0) {
+        lastTickAt = args.ctx.clock.nowMs();
+        return;
+      }
       const exposure = await args.fetchExposure();
       for (const candidate of candidates) {
         if (stopping) return;
@@ -331,6 +335,7 @@ export function createOnboardingLoop(args: OnboardingLoopArgs): ReasoningLoop {
         }`,
       );
     }
+    lastTickAt = args.ctx.clock.nowMs();
   };
 
   const start = (): void => {
@@ -354,5 +359,7 @@ export function createOnboardingLoop(args: OnboardingLoopArgs): ReasoningLoop {
     start,
     stop,
     runTick,
+    lastTickAtMs: () => lastTickAt,
+    tickIntervalMs: tickMs,
   };
 }

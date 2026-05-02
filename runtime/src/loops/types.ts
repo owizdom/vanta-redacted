@@ -162,4 +162,12 @@ export interface ReasoningLoop {
   readonly stop: () => Promise<void>;
   /** For tests: run one tick synchronously. */
   readonly runTick: () => Promise<void>;
+  /**
+   * Wall-clock ms of the last completed tick, or null if the loop hasn't
+   * ticked yet. Used by /api/runtime/state to render loop freshness in
+   * the AgentBand without re-walking the event log.
+   */
+  readonly lastTickAtMs: () => number | null;
+  /** Configured tick cadence in milliseconds — also surfaced for the band. */
+  readonly tickIntervalMs: number;
 }

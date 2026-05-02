@@ -270,6 +270,7 @@ export function createCreditLoop(args: CreditLoopArgs): ReasoningLoop {
   const sleep = args.sleepMs ?? realSleep;
   let stopping = false;
   let inFlight: Promise<void> = Promise.resolve();
+  let lastTickAt: number | null = null;
 
   const runTick = async (): Promise<void> => {
     const loans = await args.listActiveLoans();
@@ -300,6 +301,7 @@ export function createCreditLoop(args: CreditLoopArgs): ReasoningLoop {
         );
       }
     }
+    lastTickAt = args.ctx.clock.nowMs();
   };
 
   const start = (): void => {
@@ -323,6 +325,8 @@ export function createCreditLoop(args: CreditLoopArgs): ReasoningLoop {
     start,
     stop,
     runTick,
+    lastTickAtMs: () => lastTickAt,
+    tickIntervalMs: tickMs,
   };
 }
 
