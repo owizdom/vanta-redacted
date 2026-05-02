@@ -38,39 +38,72 @@ export function TradeView({ marketParam }: { readonly marketParam: string }): JS
 
   useEffect(() => {
     let cancelled = false;
+    // Two-source resolve: agent's watched set first (has token IDs +
+    // agent overlay), then the broad /api/markets corpus for any market
+    // outside the watched 7. Without the fallback, clicking a market
+    // from Politics/Sports/Crypto/Macro/Tech leaves doc=null and pledge
+    // silently bails on its `doc === null` guard.
     async function pull(): Promise<void> {
       try {
-        const r = await fetch("/api/runtime/markets/watched", { cache: "no-store" });
-        if (!r.ok) return;
-        const j = (await r.json()) as {
+        const rw = await fetch("/api/runtime/markets/watched", { cache: "no-store" });
+        if (rw.ok) {
+          const j = (await rw.json()) as {
+            markets?: Array<{
+              conditionId: string;
+              question: string | null;
+              mid: { yes: string | null; no: string | null };
+              tokens: Array<{ tokenId: string; outcome: string; price: string | null }>;
+              polymarket_url?: string | null;
+              stale?: boolean;
+              fetched_at_unix_ms?: number;
+            }>;
+          };
+          if (cancelled) return;
+          const target = (j.markets ?? []).find(
+            (m) => m.conditionId === marketParam || `0x${m.conditionId}` === marketParam,
+          );
+          if (target !== undefined) {
+            setDoc({
+              conditionId: target.conditionId,
+              question: target.question ?? "—",
+              midYesCents: parseCents(target.mid.yes),
+              midNoCents: parseCents(target.mid.no),
+              tokens: target.tokens.map((t) => ({
+                tokenId: t.tokenId,
+                outcome: t.outcome,
+                priceCents: parseCents(t.price),
+              })),
+              polymarketUrl: target.polymarket_url ?? null,
+              stale: target.stale ?? false,
+              fetchedAt: target.fetched_at_unix_ms ?? Date.now(),
+            });
+            return;
+          }
+        }
+        const rb = await fetch("/api/markets", { cache: "no-store" });
+        if (!rb.ok) return;
+        const j = (await rb.json()) as {
           markets?: Array<{
             conditionId: string;
-            question: string | null;
+            question: string;
             mid: { yes: string | null; no: string | null };
-            tokens: Array<{ tokenId: string; outcome: string; price: string | null }>;
-            polymarket_url?: string | null;
-            stale?: boolean;
-            fetched_at_unix_ms?: number;
+            polymarket_url: string | null;
           }>;
+          fetched_at?: number;
         };
         if (cancelled) return;
-        const target = (j.markets ?? []).find(
-          (m) => m.conditionId === marketParam || `0x${m.conditionId}` === marketParam,
-        );
+        const norm = marketParam.toLowerCase().replace(/^0x/, "");
+        const target = (j.markets ?? []).find((m) => m.conditionId === norm);
         if (target === undefined) return;
         setDoc({
           conditionId: target.conditionId,
-          question: target.question ?? "—",
+          question: target.question,
           midYesCents: parseCents(target.mid.yes),
           midNoCents: parseCents(target.mid.no),
-          tokens: target.tokens.map((t) => ({
-            tokenId: t.tokenId,
-            outcome: t.outcome,
-            priceCents: parseCents(t.price),
-          })),
-          polymarketUrl: target.polymarket_url ?? null,
-          stale: target.stale ?? false,
-          fetchedAt: target.fetched_at_unix_ms ?? Date.now(),
+          tokens: [],
+          polymarketUrl: target.polymarket_url,
+          stale: false,
+          fetchedAt: j.fetched_at ?? Date.now(),
         });
       } catch {
         /* keep null */
