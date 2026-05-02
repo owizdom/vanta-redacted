@@ -113,12 +113,29 @@ export class Payouts {
     bucket: PayoutBucket | "gas",
     fn: () => Promise<SubroutineOutcome>,
   ): Promise<SubroutineOutcome> {
+    const traceBucket: PayoutBucket = bucket === "gas" ? "gas_topup" : bucket;
     try {
-      return await fn();
+      const outcome = await fn();
+      // Emit a skip-trace on every regular skip so the gating decisions
+      // are visible in the signed log. Broadcast + dry-run paths emit
+      // their own outflow + sibling trace inside the subroutine, so
+      // `disabled` and `skip` are the only outcomes that need a trace
+      // here.
+      if (outcome.action === "skip") {
+        await this.emitTrace({
+          bucket: traceBucket,
+          rationale: `subroutine_skipped: ${outcome.reason ?? "unknown"}`,
+          amountUsdc6: BigInt(outcome.amountUsdc6 ?? "0"),
+          recipient: "0x0000000000000000000000000000000000000000",
+          skipReason: outcome.reason ?? "unknown",
+          dryRun: false,
+        });
+      }
+      return outcome;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await this.emitTrace({
-        bucket: bucket === "gas" ? "gas_topup" : bucket,
+        bucket: traceBucket,
         rationale: `subroutine_failed: ${msg}`,
         amountUsdc6: 0n,
         recipient: "0x0000000000000000000000000000000000000000",
