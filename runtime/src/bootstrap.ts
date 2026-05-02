@@ -327,10 +327,22 @@ async function bootWireVaultIfNeeded(args: {
     return;
   }
   if (current !== "0x0000000000000000000000000000000000000000") {
-    throw new TeeError(
-      "env_not_configured",
-      "BOOT_AND_WIRE: vault.loanBook() is non-zero AND does not match configured LoanBook — refusing to overwrite",
-      { current, configured: args.loanBookAddress },
+    // Refuse to silently overwrite a previously-wired LoanBook. Operator
+    // must opt in by setting ALLOW_LOANBOOK_REWIRE=1 — this exists for
+    // the legitimate case of re-pointing the vault at a redeployed
+    // LoanBook (e.g. v1 → v2 with origination fees). The rewire still
+    // goes through the propose+accept handshake; the gate is just a
+    // safety against a misconfigured env silently rerouting capital.
+    const allowRewire = process.env["ALLOW_LOANBOOK_REWIRE"] === "1";
+    if (!allowRewire) {
+      throw new TeeError(
+        "env_not_configured",
+        "BOOT_AND_WIRE: vault.loanBook() is non-zero AND does not match configured LoanBook — refusing to overwrite",
+        { current, configured: args.loanBookAddress },
+      );
+    }
+    process.stderr.write(
+      `[bootstrap] BOOT_AND_WIRE: ALLOW_LOANBOOK_REWIRE=1 — proceeding to rewire ${current} → ${args.loanBookAddress}\n`,
     );
   }
 
