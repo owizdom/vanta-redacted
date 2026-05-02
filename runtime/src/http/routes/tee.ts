@@ -24,6 +24,10 @@ export async function registerTeeRoute(app: FastifyInstance): Promise<void> {
       enclaveIdentityHash: t.enclaveIdentityHash,
       bootedAt: t.bootedAt,
       originationAddress: app.bootstrap.origination.address,
+      // Treasury EOA (HKDF salt `vanta-agent-treasury-v1`). Receiver of
+      // x402 micropayments and (post-Phase-2) origination fees. Public
+      // address only; the private key never leaves the enclave.
+      treasuryAddress: app.bootstrap.treasury.address,
     };
   });
 }
