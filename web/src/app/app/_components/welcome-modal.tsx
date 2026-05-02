@@ -82,13 +82,15 @@ function Welcome({
             V
           </span>
           <h2 className="font-display text-2xl font-semibold tracking-tight">
-            Welcome to VANTA
+            I'm VANTA.
           </h2>
         </div>
         <p className="mt-3 text-sm leading-relaxed text-chalk-200">
-          Don't sell your Polymarket position. Pledge it, and an AI agent
-          inside an Eigen enclave prices a loan in seconds. Keep the prediction
-          you bought; unlock the dollars sitting in it.
+          I'm an autonomous risk agent running inside an Intel TDX enclave on
+          EigenCloud. I lend USDC against your Polymarket positions — without
+          you having to sell them. I price the loan, ship the dollars, watch
+          the position every 60 seconds, and settle when it resolves. Every
+          decision I make is signed and verifiable.
         </p>
 
         <div className="mt-6 flex gap-2">
@@ -114,27 +116,27 @@ function Welcome({
 
 const STEPS = {
   "step-1": {
-    title: "Pledge your position",
+    title: "You pledge a position to me",
     body:
-      "You safeTransferFrom your YES or NO shares into VantaVault on Polygon Amoy. Your position stays on-chain; you never sell.",
-    sample: { question: "Will the USA win the 2026 FIFA World Cup?", price: "13¢", side: "Long YES", chip: "+2.80%" },
+      "Send me your YES or NO shares — they go into VantaVault on Polygon Amoy. You don't sell, and I can't move them outside the vault. The custody contract enforces that, not me.",
+    sample: { question: "Will the USA win the 2026 FIFA World Cup?", price: "13¢", side: "Long YES", chip: "Pledged" },
   },
   "step-2": {
-    title: "VANTA prices the loan",
+    title: "I price the loan",
     body:
-      "Seven hard gates check the market first — depth, dispute history, age, volatility, text clarity, template fit, tag novelty. Pass them all, and the agent reasons about the rest. The haircut formula sets your max-loan: V = p × (1 − h) × N.",
+      "Seven hard gates check the market first — depth, dispute history, age, volatility, text clarity, template fit, tag novelty. Every one must pass. Then I reason about the rest. Your max loan is V = p × (1 − h) × N — the haircut formula does the math.",
     sample: { question: "Max loan: $124,500 USDC", price: "47% LTV", side: "h ≈ 0.170", chip: "Approved" },
   },
   "step-3": {
-    title: "Loan ships on-chain",
+    title: "I ship USDC on-chain",
     body:
-      "LoanBook.originate runs on Base Sepolia. After confirmation depth ≥2, a signed loan.origination event lands in the on-disk event log. Funds hit your wallet.",
-    sample: { question: "loan.origination · 0xa6004c…", price: "+$124,500", side: "Base Sepolia", chip: "Confirmed" },
+      "I broadcast LoanBook.originate on Base Sepolia myself — my origination key is HKDF-derived in the enclave. Once it confirms with depth ≥ 2, I sign a loan.origination event into the log. Funds hit your wallet.",
+    sample: { question: "loan.origination · 0xa6004c…", price: "+$124,500", side: "Base Sepolia", chip: "Signed" },
   },
   "step-4": {
-    title: "Repay anytime",
+    title: "I watch every 60 seconds",
     body:
-      "The credit loop watches your position every 60 seconds. Repay before maturity and the loan closes; ignore it past 77% LTV and the contract liquidates. Either way, every step is a signed event a verifier can replay.",
+      "My credit loop checks your position once a minute. Repay before maturity and I close the loan. Cross 77% LTV and the contract liquidates without me. Either way, every step is a signed event you can replay back to genesis.",
     sample: { question: "loan.settlement · 0xa6004c…", price: "Closed", side: "Vault returned", chip: "Done" },
   },
 } as const satisfies Record<Exclude<Stage, "welcome" | "closed">, unknown>;
@@ -214,7 +216,13 @@ function SamplePreviewCard({
   readonly side: string;
   readonly chip: string;
 }): JSX.Element {
-  const positive = chip.startsWith("+") || chip === "Approved" || chip === "Confirmed" || chip === "Done";
+  const positive =
+    chip.startsWith("+") ||
+    chip === "Approved" ||
+    chip === "Confirmed" ||
+    chip === "Signed" ||
+    chip === "Pledged" ||
+    chip === "Done";
   return (
     <div className="rounded-xl border border-ink-700 bg-ink-950 p-4">
       <div className="flex items-start justify-between gap-3">

@@ -46,6 +46,61 @@ export async function fetchEvents(): Promise<readonly VantaEventSummary[]> {
   return r.events ?? [];
 }
 
+export interface LoopFreshness {
+  readonly age_s: number | null;
+  readonly next_eta_s: number;
+  readonly interval_s: number;
+}
+
+export interface AgentPosition {
+  readonly label: string;
+  readonly loan_id: string;
+  readonly condition_id: string;
+  readonly principal_usdc: string;
+  readonly haircut_bps: number;
+  readonly maturity_ts_unix: number;
+}
+
+export interface AgentMarketDecision {
+  readonly cid: string;
+  readonly haircut_bps: number;
+  readonly ltv_max_bps: number;
+  readonly decision: string;
+  readonly reviewed_at_unix_ms: number;
+}
+
+export interface AgentLastDecision {
+  readonly id: string;
+  readonly type: string;
+  readonly age_s: number;
+  readonly body: Record<string, unknown>;
+}
+
+export interface AgentState {
+  readonly now_unix_ms: number;
+  readonly watching_n: number;
+  readonly probation_n: number;
+  readonly positions: readonly AgentPosition[];
+  readonly earned_today_usdc: string;
+  readonly runway_days: number;
+  readonly last_decision: AgentLastDecision | null;
+  readonly loops: {
+    readonly credit: LoopFreshness;
+    readonly model: LoopFreshness;
+    readonly operational: LoopFreshness;
+    readonly onboarding: LoopFreshness;
+  };
+  readonly market_decisions: readonly AgentMarketDecision[];
+}
+
+export async function fetchAgentState(): Promise<AgentState | null> {
+  try {
+    return await getJson<AgentState>("/state");
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchWatchedMarkets(): Promise<readonly MarketWatched[]> {
   const r = await getJson<{ markets?: MarketWatched[] }>("/markets/watched");
   return r.markets ?? [];
