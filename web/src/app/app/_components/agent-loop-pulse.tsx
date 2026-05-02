@@ -1,14 +1,12 @@
 "use client";
 
 /**
- * Four-dot loop cadence strip. Each dot represents one of VANTA's
- * reasoning loops (paper §7); pulse opacity is tied to freshness so a
- * loop that just ticked glows briefly, and a long-cadence loop reads
- * as quietly alive instead of stuck.
+ * Loop status pills — one per reasoning loop. A loop is "active" when
+ * its last tick is within 1.5× its cadence; long-cadence loops (model,
+ * onboarding) read as inactive between ticks, which is honest.
  *
- * Used by `<AgentBand>` (permanent surface on /app) and by `<AgentChip>`
- * (top-nav popover). Keeping the layout primitive separate from the
- * data fetcher lets both surfaces stay visually consistent.
+ * Visual chrome matches the AgentBand card design: dark pill, bordered,
+ * violet-400 dot when active, neutral gray when idle.
  */
 
 import type { LoopFreshness } from "@/lib/runtime";
@@ -16,10 +14,10 @@ import type { LoopFreshness } from "@/lib/runtime";
 type LoopName = "credit" | "model" | "operational" | "onboarding";
 
 const LABELS: Record<LoopName, string> = {
-  credit: "credit",
-  model: "model",
-  operational: "operational",
-  onboarding: "onboarding",
+  credit: "Credit",
+  model: "Model",
+  operational: "Operational",
+  onboarding: "Onboarding",
 };
 
 const CADENCE: Record<LoopName, string> = {
@@ -37,25 +35,46 @@ function fmtAge(secs: number | null): string {
   return `${Math.floor(secs / 86_400)}d`;
 }
 
-function fmtEta(secs: number, intervalS: number): string {
-  // For the credit loop (60s cadence) we surface a live countdown.
-  // Other loops just show "wk" / "1h" / "6h" cadence labels — a
-  // countdown feels misleading when the loop is hours away.
-  if (intervalS <= 5 * 60) {
-    return `next ${String(Math.max(0, secs))}s`;
-  }
-  return "—";
+function isActive(f: LoopFreshness): boolean {
+  return f.age_s !== null && f.age_s <= f.interval_s * 1.5;
 }
 
-function dotTone(ageS: number | null, intervalS: number): {
-  bg: string;
-  ring: string;
-} {
-  if (ageS === null) return { bg: "bg-ink-700", ring: "ring-ink-700/40" };
-  // Healthy if ageS < 1.5 × interval. Anything older has missed a tick.
-  if (ageS <= intervalS * 1.5) return { bg: "bg-signal-green", ring: "ring-signal-green/40" };
-  if (ageS <= intervalS * 4) return { bg: "bg-signal-amber", ring: "ring-signal-amber/40" };
-  return { bg: "bg-signal-red", ring: "ring-signal-red/40" };
+function StatusPill({
+  label,
+  cadence,
+  active,
+  ageLabel,
+  etaLabel,
+}: {
+  readonly label: string;
+  readonly cadence: string;
+  readonly active: boolean;
+  readonly ageLabel: string;
+  readonly etaLabel: string | null;
+}): JSX.Element {
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-[#2c2c2e] bg-[#1c1c1e] px-3 py-1.5">
+      <span className="relative flex h-1.5 w-1.5">
+        {active && (
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-40" />
+        )}
+        <span
+          className={`relative inline-flex h-1.5 w-1.5 rounded-full ${
+            active ? "bg-violet-400" : "bg-[#48484a]"
+          }`}
+        />
+      </span>
+      <span className="text-[11px] font-medium uppercase tracking-wide text-[#8e8e93]">
+        {label}
+      </span>
+      <span className="text-[11px] font-semibold text-[#e5e5ea]">{cadence}</span>
+      <span className="text-[#48484a]">·</span>
+      <span className="font-mono text-[11px] text-[#8e8e93]">{ageLabel}</span>
+      {etaLabel !== null && (
+        <span className="hidden font-mono text-[11px] text-[#636366] sm:inline">{etaLabel}</span>
+      )}
+    </div>
+  );
 }
 
 export function AgentLoopPulse({
@@ -64,36 +83,25 @@ export function AgentLoopPulse({
   readonly loops: Record<LoopName, LoopFreshness>;
 }): JSX.Element {
   return (
-    <ul className="flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[11px]">
+    <div className="flex flex-wrap gap-2">
       {(Object.keys(LABELS) as LoopName[]).map((k) => {
         const f = loops[k];
-        const tone = dotTone(f.age_s, f.interval_s);
+        const active = isActive(f);
+        const eta =
+          f.interval_s <= 5 * 60
+            ? `next ${String(Math.max(0, f.next_eta_s))}s`
+            : null;
         return (
-          <li key={k} className="flex items-center gap-2">
-            <span
-              aria-hidden
-              className={`relative grid h-2 w-2 place-items-center rounded-full ${tone.bg} ring-2 ${tone.ring}`}
-            >
-              <span
-                className={`absolute inset-0 rounded-full ${tone.bg} animate-ping opacity-60`}
-                style={{
-                  animationDuration:
-                    f.interval_s <= 90
-                      ? "1.5s"
-                      : f.interval_s <= 60 * 60
-                        ? "3s"
-                        : "5s",
-                }}
-              />
-            </span>
-            <span className="text-chalk-300">{LABELS[k]}</span>
-            <span className="text-chalk-500">{CADENCE[k]}</span>
-            <span className="text-chalk-400">·</span>
-            <span className="text-chalk-200">{fmtAge(f.age_s)} ago</span>
-            <span className="text-chalk-500 hidden sm:inline">{fmtEta(f.next_eta_s, f.interval_s)}</span>
-          </li>
+          <StatusPill
+            key={k}
+            label={LABELS[k]}
+            cadence={CADENCE[k]}
+            active={active}
+            ageLabel={`${fmtAge(f.age_s)} ago`}
+            etaLabel={eta}
+          />
         );
       })}
-    </ul>
+    </div>
   );
 }

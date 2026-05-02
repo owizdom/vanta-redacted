@@ -1,14 +1,21 @@
 "use client";
 
 /**
- * `<AgentBand>` — full-width hero band shown above the markets table.
+ * `<AgentBand>` — VANTA's "right now" status card.
  *
- * Replaces the old `<LiveStrip>` with a surface that broadcasts what
- * VANTA *is doing right now*: posture line + 4 reasoning loops + last
- * signed decision + ambient identity strip.
+ * Shipped above the markets table on /app. Polls /api/runtime/state +
+ * /.well-known/attestation every 6s and renders:
+ *   - header (live dot + wordmark)
+ *   - hero metric (earned today, with markets/runway/probation/positions
+ *     stacked on the right)
+ *   - 4 loop pills (credit/model/operational/onboarding)
+ *   - last signed decision pill, with a "view chain →" link
+ *   - identity meta strip (image hash, genesis, KMS, signing key, attestation age)
  *
- * Polls /api/runtime/state every 6s. Falls back to a neutral skeleton
- * when the runtime is offline so the page never reads as broken.
+ * Color palette pinned inline (matches the card design reference); doesn't
+ * depend on the global ink/chalk tokens so the card reads correctly on
+ * any background and visual drift between the design and runtime UI is
+ * impossible.
  */
 
 import Link from "next/link";
@@ -53,10 +60,11 @@ function fmtAge(secs: number | null): string {
   return `${Math.floor(secs / 86_400)}d`;
 }
 
-function fmtRunway(days: number): string {
-  if (days < 30) return `${days}d`;
-  const months = Math.floor(days / 30);
-  return `${months}mo`;
+function fmtRunwayDays(days: number): { value: string; suffix: string } {
+  if (days <= 0) return { value: "0", suffix: "d" };
+  if (days < 60) return { value: String(days), suffix: "d" };
+  if (days < 365) return { value: String(Math.floor(days / 30)), suffix: "mo" };
+  return { value: String((days / 365).toFixed(1)), suffix: "y" };
 }
 
 function decisionSummary(d: AgentState["last_decision"]): string {
@@ -101,6 +109,66 @@ function decisionSummary(d: AgentState["last_decision"]): string {
 
 function decisionTypeLabel(t: string): string {
   return t.replace(/^loop\.|^op\./, "").replace(/_/g, " ");
+}
+
+function DecisionIcon({ hasDecision }: { readonly hasDecision: boolean }): JSX.Element {
+  if (!hasDecision) {
+    return (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#636366" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+      </svg>
+    );
+  }
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a78ff" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function HeroStat({
+  label,
+  value,
+  suffix,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly suffix?: string;
+}): JSX.Element {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[#636366]">
+        {label}
+      </span>
+      <span className="text-lg font-semibold text-[#e5e5ea]">
+        {value}
+        {suffix !== undefined && (
+          <span className="font-normal text-[#636366]">{suffix}</span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function MetaItem({
+  label,
+  value,
+  separator = false,
+  valueClass = "text-[#8e8e93]",
+}: {
+  readonly label: string;
+  readonly value: string | null;
+  readonly separator?: boolean;
+  readonly valueClass?: string;
+}): JSX.Element {
+  return (
+    <div className="flex items-center gap-1.5">
+      {separator && <span aria-hidden className="mr-1 text-[#48484a]">·</span>}
+      <span className="text-[10px] font-medium uppercase tracking-widest text-[#636366]">{label}</span>
+      <span className={`text-[10px] font-semibold ${valueClass}`}>{value ?? "—"}</span>
+    </div>
+  );
 }
 
 export function AgentBand(): JSX.Element {
@@ -148,8 +216,8 @@ export function AgentBand(): JSX.Element {
   const probation = state?.probation_n ?? 0;
   const earned = state?.earned_today_usdc ?? "0.00";
   const runway = state?.runway_days ?? 0;
-  const watchBand = positions.length;
   const lastDecision = state?.last_decision ?? null;
+
   const loops = state?.loops ?? {
     credit:      { age_s: null, next_eta_s: 60,             interval_s: 60 },
     model:       { age_s: null, next_eta_s: 7 * 24 * 3600,  interval_s: 7 * 24 * 3600 },
@@ -160,98 +228,139 @@ export function AgentBand(): JSX.Element {
   const attestAgeS = att.fetched_at_ms === 0
     ? null
     : Math.floor((Date.now() - att.fetched_at_ms) / 1000);
-
-  const genesisDate = att.genesis_ts_unix_ms !== null
+  const genesisShort = att.genesis_ts_unix_ms !== null
     ? new Date(att.genesis_ts_unix_ms).toISOString().slice(5, 10)
-    : "—";
+    : null;
+
+  const runwayParts = fmtRunwayDays(runway);
 
   return (
     <section
       aria-label="VANTA — agent posture"
-      className="overflow-hidden rounded-2xl border border-ink-800 bg-ink-900/60"
+      className="relative overflow-hidden rounded-2xl border border-[#1c1c1e] bg-[#0d0d0f] shadow-2xl shadow-black/50"
     >
-      {/* ─── Posture line ─────────────────────────────────────── */}
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-2 border-b border-ink-800 px-5 py-4">
-        <div className="flex items-center gap-2">
-          <span aria-hidden className="grid h-1.5 w-1.5 place-items-center">
-            <span className="h-1.5 w-1.5 rounded-full bg-violet-500 animate-pulse" />
-          </span>
-          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-chalk-400">
-            VANTA · right now
-          </span>
-        </div>
+      {/* Top hairline gradient */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#2c2c2e] to-transparent"
+      />
 
-        <p className="text-base text-chalk-100 sm:text-lg">
-          <span className="text-chalk-50">Watching </span>
-          <span className="font-display font-semibold text-chalk-50">{watching}</span>
-          <span className="text-chalk-50"> markets</span>
-          {probation > 0 && (
-            <>
-              <span className="text-chalk-400"> · </span>
-              <span className="font-display font-semibold text-chalk-50">{probation}</span>
-              <span className="text-chalk-200"> in onboarding probation</span>
-            </>
-          )}
-          {watchBand > 0 && (
-            <>
-              <span className="text-chalk-400"> · </span>
-              <span className="font-display font-semibold text-chalk-50">{watchBand}</span>
-              <span className="text-chalk-200"> position{watchBand === 1 ? "" : "s"} on the books</span>
-            </>
-          )}
-          <span className="text-chalk-400"> · </span>
-          <span className="text-chalk-200">runway </span>
-          <span className="font-display font-semibold text-chalk-50">{fmtRunway(runway)}</span>
-          <span className="text-chalk-400"> · </span>
-          <span className="text-chalk-200">earned today </span>
-          <span className="font-display font-semibold text-signal-green">${earned}</span>
-        </p>
-      </div>
-
-      {/* ─── Loop pulse strip ─────────────────────────────────── */}
-      <div className="border-b border-ink-800 px-5 py-3">
-        <AgentLoopPulse loops={loops} />
-      </div>
-
-      {/* ─── Last signed decision ─────────────────────────────── */}
-      <div className="flex flex-col gap-1.5 border-b border-ink-800 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-        <div className="flex flex-wrap items-baseline gap-2 min-w-0">
-          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-chalk-400">
-            last decision
-          </span>
-          {lastDecision !== null && (
-            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-violet-300">
-              {decisionTypeLabel(lastDecision.type)}
+      <div className="p-6 sm:p-8">
+        {/* ─── Header ───────────────────────────────────────── */}
+        <div className="mb-7 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="relative inline-flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-500 opacity-40" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-violet-500" />
             </span>
-          )}
-          <span className="text-sm text-chalk-100 truncate">
-            {decisionSummary(lastDecision)}
-          </span>
-          <span className="font-mono text-[11px] text-chalk-400">
-            {lastDecision === null ? "" : `${fmtAge(lastDecision.age_s)} ago`}
-          </span>
+            <div className="flex items-baseline gap-2">
+              <span className="text-sm font-bold uppercase tracking-[0.15em] text-white">
+                Vanta
+              </span>
+              <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[#636366]">
+                Right now
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-[#48484a]">
+            <span className="relative inline-flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-30" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet-500" />
+            </span>
+            <span className="font-medium uppercase tracking-wide">Live</span>
+          </div>
         </div>
-        {lastDecision !== null ? (
-          <Link
-            href={`/events?id=${lastDecision.id}`}
-            className="self-start whitespace-nowrap rounded-md border border-ink-700 bg-ink-900 px-2.5 py-1 font-mono text-[11px] text-chalk-200 transition hover:border-violet-500/60 hover:text-chalk-50 sm:self-auto"
+
+        {/* ─── Hero metrics ────────────────────────────────── */}
+        <div className="mb-7 flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] font-medium uppercase tracking-[0.15em] text-[#636366]">
+              Earned today
+            </span>
+            <span className="font-display text-4xl font-light tracking-tight text-white sm:text-5xl">
+              <span className="font-normal text-violet-400">$</span>
+              {earned}
+            </span>
+          </div>
+          <div className="flex items-end gap-6 sm:gap-8">
+            <HeroStat label="Markets" value={String(watching)} />
+            {probation > 0 && <HeroStat label="Probation" value={String(probation)} />}
+            {positions.length > 0 && (
+              <HeroStat label="Positions" value={String(positions.length)} />
+            )}
+            <HeroStat label="Runway" value={runwayParts.value} suffix={runwayParts.suffix} />
+          </div>
+        </div>
+
+        {/* ─── Loop pills ──────────────────────────────────── */}
+        <div className="mb-7">
+          <AgentLoopPulse loops={loops} />
+        </div>
+
+        {/* Divider */}
+        <div className="mb-6 h-px bg-[#1c1c1e]" />
+
+        {/* ─── Last decision ────────────────────────────────── */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#48484a]">
+              Last decision
+            </span>
+            <span className="text-[10px] text-[#636366]">
+              {lastDecision === null ? "—" : `${fmtAge(lastDecision.age_s)} ago`}
+            </span>
+          </div>
+          <div
+            className={`flex items-center gap-3 rounded-lg border px-4 py-3.5 ${
+              lastDecision === null
+                ? "border-dashed border-[#1c1c1e] bg-[#111113]"
+                : "border-[#1c1c1e] bg-[#111113]"
+            }`}
           >
-            view chain →
-          </Link>
-        ) : null}
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1c1c1e]">
+              <DecisionIcon hasDecision={lastDecision !== null} />
+            </div>
+            <div className="flex min-w-0 flex-1 items-baseline gap-2">
+              {lastDecision !== null && (
+                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-400">
+                  {decisionTypeLabel(lastDecision.type)}
+                </span>
+              )}
+              <span
+                className={`truncate text-sm font-medium ${
+                  lastDecision === null ? "text-[#636366]" : "text-[#e5e5ea]"
+                }`}
+              >
+                {decisionSummary(lastDecision)}
+              </span>
+            </div>
+            {lastDecision !== null && (
+              <Link
+                href={`/events?id=${lastDecision.id}`}
+                className="shrink-0 whitespace-nowrap rounded-md border border-[#2c2c2e] bg-[#1c1c1e] px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide text-[#8e8e93] transition hover:border-violet-500/40 hover:text-[#e5e5ea]"
+              >
+                view chain →
+              </Link>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* ─── Identity micro-strip ─────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-chalk-400">
-        <span>image <span className="text-chalk-200 normal-case tracking-normal">{shortHex(att.enclave_identity_hash)}</span></span>
-        <span aria-hidden>·</span>
-        <span>genesis <span className="text-chalk-200 normal-case tracking-normal">{genesisDate}</span></span>
-        <span aria-hidden>·</span>
-        <span>kms <span className="text-chalk-200 normal-case tracking-normal">{att.kms_kind ?? "—"}</span></span>
-        <span aria-hidden>·</span>
-        <span>signed <span className="text-chalk-200 normal-case tracking-normal">{shortHex(att.signing_pub_key)}</span></span>
-        <span aria-hidden>·</span>
-        <span>attestation <span className="text-signal-green normal-case tracking-normal">{fmtAge(attestAgeS)}</span> ago</span>
+      {/* ─── Bottom meta bar ─────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[#1c1c1e] bg-[#0a0a0c] px-6 py-4 sm:px-8">
+        <MetaItem label="Image" value={shortHex(att.enclave_identity_hash)} />
+        <MetaItem label="Genesis" value={genesisShort ?? "—"} separator />
+        <MetaItem label="KMS" value={att.kms_kind ?? "—"} separator />
+        <MetaItem label="Signed" value={shortHex(att.signing_pub_key)} separator />
+        <MetaItem
+          label="Attestation"
+          value={`${fmtAge(attestAgeS)}`}
+          separator
+          valueClass="text-violet-400"
+        />
+        <span className="text-[10px] font-medium uppercase tracking-widest text-[#48484a]">
+          ago
+        </span>
       </div>
     </section>
   );
