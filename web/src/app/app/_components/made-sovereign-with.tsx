@@ -18,7 +18,7 @@
 import { useEffect, useState } from "react";
 
 const VERIFY_URL =
-  "https://verify-sepolia.eigencloud.xyz/app/0xaa4875ff1514b8227dc61466473c0b1e4c83caf9";
+  "https://verify-sepolia.eigencloud.xyz/app/0x98Ff56d84B31F44DacB4688828Dc19CD85393033";
 
 export function MadeSovereignWith(): JSX.Element {
   // Empty on first paint to avoid an SSR/client hydration mismatch on
