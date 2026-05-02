@@ -11,3 +11,4 @@ packages:
   - "verify"
   - "runtime"
   - "scripts"
+  - "web"

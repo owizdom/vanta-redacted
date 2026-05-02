@@ -19,7 +19,14 @@
     "typecheck": "tsc --build",
     "forge:build": "cd contracts && forge build",
     "forge:test": "cd contracts && forge test",
-    "start": "pnpm --filter @vanta/runtime start"
+    "start": "pnpm --filter @vanta/runtime start",
+    "dev": "tsx scripts/dev.ts",
+    "demo": "tsx scripts/demo.ts",
+    "anvil:up": "bash scripts/anvil-up.sh",
+    "anvil:down": "bash scripts/anvil-down.sh",
+    "deploy:local": "bash scripts/deploy-local.sh",
+    "web:dev": "pnpm --filter @vanta/web dev",
+    "web:build": "pnpm --filter @vanta/web build"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
