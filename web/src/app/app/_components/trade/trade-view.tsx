@@ -21,9 +21,29 @@ interface MarketDoc {
   readonly midNoCents: number | null;
   readonly tokens: readonly MarketOutcome[];
   readonly polymarketUrl: string | null;
+  readonly endDateIso: string | null;
+  readonly volumeUsd: number | null;
+  readonly liquidityUsd: number | null;
+  readonly oneDayPriceChange: number | null;
   readonly stale: boolean;
   readonly fetchedAt: number;
 }
+
+interface AgentDecision {
+  readonly cid: string;
+  readonly haircut_bps: number;
+  readonly ltv_max_bps: number;
+  readonly decision: string;
+  readonly reviewed_at_unix_ms: number;
+}
+
+interface RuntimeLoops {
+  readonly credit?: { readonly age_s: number };
+}
+
+const LIQUIDATION_LTV_PCT = 77;
+const PROBATION_DAYS = 7;
+const PROBATION_CAP_USD = 25_000;
 
 const STAT_GAP = "min-w-[88px]";
 
@@ -32,9 +52,10 @@ export function TradeView({ marketParam }: { readonly marketParam: string }): JS
   const initialSide = sp.get("side") === "NO" ? "NO" : "YES";
   const [doc, setDoc] = useState<MarketDoc | null>(null);
   const [side, setSide] = useState<"YES" | "NO">(initialSide as "YES" | "NO");
-  const [tradeMode, setTradeMode] = useState<"market" | "limit" | "pro">("market");
-  const [margin, setMargin] = useState<string>("0.00");
-  const [leverage, setLeverage] = useState<number>(2);
+  const [pledge, setPledge] = useState<string>("0.00");
+  const [ltvPct, setLtvPct] = useState<number>(25);
+  const [agentDecision, setAgentDecision] = useState<AgentDecision | null>(null);
+  const [creditAgeS, setCreditAgeS] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,6 +75,10 @@ export function TradeView({ marketParam }: { readonly marketParam: string }): JS
               mid: { yes: string | null; no: string | null };
               tokens: Array<{ tokenId: string; outcome: string; price: string | null }>;
               polymarket_url?: string | null;
+              end_date_iso?: string | null;
+              volume_usd?: number | null;
+              liquidity_usd?: number | null;
+              one_day_price_change?: number | null;
               stale?: boolean;
               fetched_at_unix_ms?: number;
             }>;
@@ -74,6 +99,10 @@ export function TradeView({ marketParam }: { readonly marketParam: string }): JS
                 priceCents: parseCents(t.price),
               })),
               polymarketUrl: target.polymarket_url ?? null,
+              endDateIso: target.end_date_iso ?? null,
+              volumeUsd: target.volume_usd ?? null,
+              liquidityUsd: target.liquidity_usd ?? null,
+              oneDayPriceChange: target.one_day_price_change ?? null,
               stale: target.stale ?? false,
               fetchedAt: target.fetched_at_unix_ms ?? Date.now(),
             });
@@ -88,6 +117,11 @@ export function TradeView({ marketParam }: { readonly marketParam: string }): JS
             question: string;
             mid: { yes: string | null; no: string | null };
             polymarket_url: string | null;
+            end_date_iso?: string | null;
+            volume_usd?: number | null;
+            volume_24h_usd?: number | null;
+            liquidity_usd?: number | null;
+            one_day_price_change?: number | null;
           }>;
           fetched_at?: number;
         };
@@ -102,6 +136,10 @@ export function TradeView({ marketParam }: { readonly marketParam: string }): JS
           midNoCents: parseCents(target.mid.no),
           tokens: [],
           polymarketUrl: target.polymarket_url,
+          endDateIso: target.end_date_iso ?? null,
+          volumeUsd: target.volume_usd ?? null,
+          liquidityUsd: target.liquidity_usd ?? null,
+          oneDayPriceChange: target.one_day_price_change ?? null,
           stale: false,
           fetchedAt: j.fetched_at ?? Date.now(),
         });
@@ -117,6 +155,40 @@ export function TradeView({ marketParam }: { readonly marketParam: string }): JS
     };
   }, [marketParam]);
 
+  // Agent overlay: per-market decision (haircut, ltv cap, reviewed_at)
+  // and the credit-loop tick age. Reads /api/runtime/state and matches
+  // the cid to market_decisions[]. Both shapes are stable; the loop age
+  // is what drives the "last tick {Xs} ago" line (paper §7).
+  useEffect(() => {
+    let cancelled = false;
+    async function pull(): Promise<void> {
+      try {
+        const r = await fetch("/api/runtime/state", { cache: "no-store" });
+        if (!r.ok) return;
+        const j = (await r.json()) as {
+          market_decisions?: AgentDecision[];
+          loops?: RuntimeLoops;
+        };
+        if (cancelled) return;
+        const norm = marketParam.toLowerCase().replace(/^0x/, "");
+        const dec =
+          (j.market_decisions ?? []).find(
+            (d) => d.cid.toLowerCase().replace(/^0x/, "") === norm,
+          ) ?? null;
+        setAgentDecision(dec);
+        setCreditAgeS(j.loops?.credit?.age_s ?? null);
+      } catch {
+        /* keep prior */
+      }
+    }
+    void pull();
+    const t = setInterval(() => void pull(), 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [marketParam]);
+
   const midCents = doc !== null ? (side === "YES" ? doc.midYesCents : doc.midNoCents) : null;
 
   return (
@@ -125,6 +197,7 @@ export function TradeView({ marketParam }: { readonly marketParam: string }): JS
       <div className="-mx-6 -my-8 grid grid-cols-1 gap-3 px-3 py-3 lg:grid-cols-[minmax(0,1fr)_320px_300px]">
         <div className="space-y-3">
           <MarketHeader doc={doc} marketParam={marketParam} />
+          <AgentPanel decision={agentDecision} creditAgeS={creditAgeS} />
           <ChartCard doc={doc} side={side} />
           <BottomTabs />
         </div>
@@ -133,13 +206,12 @@ export function TradeView({ marketParam }: { readonly marketParam: string }): JS
           doc={doc}
           side={side}
           setSide={setSide}
-          tradeMode={tradeMode}
-          setTradeMode={setTradeMode}
-          margin={margin}
-          setMargin={setMargin}
-          leverage={leverage}
-          setLeverage={setLeverage}
+          pledge={pledge}
+          setPledge={setPledge}
+          ltvPct={ltvPct}
+          setLtvPct={setLtvPct}
           midCents={midCents}
+          decision={agentDecision}
         />
       </div>
       <LiveMarquee currentCid={marketParam} />
@@ -180,8 +252,11 @@ function MarketHeader({
 }): JSX.Element {
   const question = doc?.question ?? "Loading market…";
   const midYesCents = doc?.midYesCents ?? null;
-  const midNoCents = doc?.midNoCents ?? null;
   const lastTraded = midYesCents !== null ? `${midYesCents}¢` : "—";
+  const resolvesIn = formatResolvesIn(doc?.endDateIso ?? null);
+  const volume = formatUsdCompact(doc?.volumeUsd ?? null);
+  const liquidity = formatUsdCompact(doc?.liquidityUsd ?? null);
+  const delta = formatPercent(doc?.oneDayPriceChange ?? null, midYesCents);
 
   return (
     <div className="rounded-2xl border border-ink-800 bg-ink-900/60 p-4">
@@ -221,58 +296,27 @@ function MarketHeader({
             </div>
           </div>
 
-          {/* Stat row */}
+          {/* Stat row — keep only quantities a lender actually reads to
+              size a loan: live price, 24h drift, depth, days-to-resolve. */}
           <div className="mt-3 flex flex-wrap gap-x-8 gap-y-3 text-xs">
-            <Stat label="Price" value={lastTraded} valueClass="text-chalk-50 font-display text-base font-semibold" />
-            <Stat label="24h ch" value="—" />
-            <Stat label="Open Interest" value="$0" />
-            <Stat label="Capacity left" value="$19.9K" />
-            <Stat label="Volume" value="$13.5K" />
-            <Stat label="Liquidity" value="$34.2K" />
-            <Stat label="Auto-close" value="May 8, 1pm" valueClass="text-chalk-50 font-mono text-xs" />
-          </div>
-
-          <div className="mt-3 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-6">
-              <div>
-                <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-chalk-400">
-                  ◉ Tweet count
-                </p>
-                <p className="font-mono text-chalk-100">0</p>
-              </div>
-              <div>
-                <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-chalk-400 underline-offset-2">
-                  Early Auto-close
-                </p>
-                <p className="text-chalk-100">Normal</p>
-              </div>
-            </div>
-            <Link
-              href="/paper"
-              className="inline-flex items-center gap-1 rounded-full border border-violet-500/40 bg-violet-500/10 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-violet-300 hover:border-violet-500"
-            >
-              <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
-              Read auto-close rule
-            </Link>
+            <Stat
+              label="Price"
+              value={lastTraded}
+              valueClass="text-chalk-50 font-display text-base font-semibold"
+            />
+            <Stat
+              label="24h Δ"
+              value={delta.text}
+              valueClass={`font-mono text-sm ${delta.tone}`}
+            />
+            <Stat label="Volume" value={volume} />
+            <Stat label="Liquidity" value={liquidity} />
+            <Stat label="Resolves in" value={resolvesIn} />
           </div>
         </div>
       </div>
 
-      {/* Outcome chips */}
-      <div className="mt-4 flex flex-wrap gap-2">
-        <OutcomeChip
-          question={question}
-          label="240-259 tweets"
-          priceCents={midYesCents ?? 11}
-          active
-        />
-        <OutcomeChip question={question} label="220-239 tweets" priceCents={(midNoCents ?? 16) - 1} />
-        <OutcomeChip question={question} label="200-219 tweets" priceCents={(midNoCents ?? 16) - 1} />
-        <OutcomeChip question={question} label="180-199 tweets" priceCents={(midNoCents ?? 13)} />
-        <OutcomeChip question={question} label="160-179 tweets" priceCents={(midNoCents ?? 12) - 1} />
-      </div>
-
-      <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.18em] text-chalk-400">
+      <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.18em] text-chalk-400">
         cid · 0x{marketParam.slice(0, 8)}…{marketParam.slice(-4)}
       </p>
     </div>
@@ -296,30 +340,156 @@ function Stat({
   );
 }
 
-function OutcomeChip({
-  question,
-  label,
-  priceCents,
-  active,
+function formatResolvesIn(iso: string | null): string {
+  if (iso === null || iso === "") return "—";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "—";
+  const days = Math.round((t - Date.now()) / 86_400_000);
+  if (days < 0) return "resolved";
+  if (days === 0) return "today";
+  if (days === 1) return "1 day";
+  if (days < 30) return `${days} days`;
+  if (days < 365) return `${Math.round(days / 30)}mo`;
+  return `${(days / 365).toFixed(1)}y`;
+}
+
+function formatUsdCompact(n: number | null): string {
+  if (n === null || n === 0) return "—";
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
+// 24h Δ as a price-relative percentage. Polymarket reports
+// `oneDayPriceChange` in dollars (e.g. 0.012); divide by current mid to
+// get the percentage move at this price level.
+function formatPercent(
+  delta: number | null,
+  midCents: number | null,
+): { text: string; tone: string } {
+  if (delta === null || delta === 0 || midCents === null || midCents === 0) {
+    return { text: "—", tone: "text-chalk-400" };
+  }
+  const pct = (delta / (midCents / 100)) * 100;
+  const sign = pct > 0 ? "+" : "";
+  const tone = pct > 0 ? "text-signal-green" : "text-signal-red";
+  return { text: `${sign}${pct.toFixed(2)}%`, tone };
+}
+
+function formatAgeShort(s: number): string {
+  if (s < 60) return `${Math.max(0, Math.floor(s))}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86_400)}d`;
+}
+
+function AgentPanel({
+  decision,
+  creditAgeS,
 }: {
-  readonly question: string;
+  readonly decision: AgentDecision | null;
+  readonly creditAgeS: number | null;
+}): JSX.Element {
+  if (decision === null) {
+    return (
+      <div className="rounded-2xl border border-ink-800 bg-ink-900/40 p-3">
+        <div className="flex items-start gap-2">
+          <span className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-chalk-500" />
+          <div className="text-xs text-chalk-300">
+            <span className="font-mono uppercase tracking-[0.16em] text-chalk-400">
+              Unreviewed
+            </span>{" "}
+            — outside the agent&apos;s onboarded set. The 50% LTV cap and
+            77% liquidation invariants apply only to markets the agent has
+            cleared (paper §7). Pledge is disabled.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const haircutPct = (decision.haircut_bps / 100).toFixed(2);
+  const ltvCapPct = Math.round(decision.ltv_max_bps / 100);
+  const reviewedAgeMs = Date.now() - decision.reviewed_at_unix_ms;
+  const reviewedAgo = formatAgeShort(reviewedAgeMs / 1000);
+  const inProbation = reviewedAgeMs / 86_400_000 < PROBATION_DAYS;
+  const tickAgo = creditAgeS !== null ? formatAgeShort(creditAgeS) : null;
+
+  return (
+    <div className="rounded-2xl border border-violet-500/30 bg-violet-500/5 p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="inline-block h-1.5 w-1.5 animate-pulse-dot rounded-full bg-violet-400" />
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-violet-300">
+            VANTA reviewed · {reviewedAgo} ago
+          </span>
+        </div>
+        {tickAgo !== null && (
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-chalk-400">
+            credit loop · {tickAgo} ago
+          </span>
+        )}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-3 text-xs sm:grid-cols-4">
+        <AgentStat
+          label="Haircut"
+          value={`${haircutPct}%`}
+          hint="resolution-aware"
+        />
+        <AgentStat
+          label="LTV cap"
+          value={`${ltvCapPct}%`}
+          hint="agent-set"
+        />
+        <AgentStat
+          label="Liquidates at"
+          value={`${LIQUIDATION_LTV_PCT}% LTV`}
+          hint="contract"
+        />
+        <AgentStat
+          label={inProbation ? "Probation cap" : "Status"}
+          value={
+            inProbation
+              ? `$${(PROBATION_CAP_USD / 1000).toFixed(0)}K · 7d`
+              : "Live"
+          }
+          hint={inProbation ? "first 7 days" : "post-probation"}
+        />
+      </div>
+
+      <Link
+        href="/paper#sec-haircut"
+        className="mt-3 inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.16em] text-violet-300 hover:underline"
+      >
+        formula · paper §5
+        <ExternalIcon />
+      </Link>
+    </div>
+  );
+}
+
+function AgentStat({
+  label,
+  value,
+  hint,
+}: {
   readonly label: string;
-  readonly priceCents: number;
-  readonly active?: boolean;
+  readonly value: string;
+  readonly hint: string;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs transition ${
-        active
-          ? "border-violet-500/50 bg-violet-500/10 text-chalk-50"
-          : "border-ink-800 bg-ink-900 text-chalk-200 hover:border-ink-700"
-      }`}
-    >
-      <MarketAvatar question={`${question} ${label}`} size={20} />
-      <span>{label}</span>
-      <span className="font-mono text-chalk-50">{priceCents}¢</span>
-    </button>
+    <div>
+      <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-chalk-400">
+        {label}
+      </p>
+      <p className="mt-1 font-display text-base font-semibold text-chalk-50">
+        {value}
+      </p>
+      <p className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.14em] text-chalk-500">
+        {hint}
+      </p>
+    </div>
   );
 }
 
@@ -621,14 +791,14 @@ function OrderBookCard({
             onClick={() => setView("long")}
             className={`rounded px-2 py-0.5 ${view === "long" ? "bg-ink-700 text-chalk-50" : "text-chalk-400"}`}
           >
-            Long
+            YES
           </button>
           <button
             type="button"
             onClick={() => setView("short")}
             className={`rounded px-2 py-0.5 ${view === "short" ? "bg-ink-700 text-chalk-50" : "text-chalk-400"}`}
           >
-            Short
+            NO
           </button>
         </div>
       </div>
@@ -745,30 +915,37 @@ function TradePanel({
   doc,
   side,
   setSide,
-  tradeMode,
-  setTradeMode,
-  margin,
-  setMargin,
-  leverage,
-  setLeverage,
+  pledge,
+  setPledge,
+  ltvPct,
+  setLtvPct,
   midCents,
+  decision,
 }: {
   readonly doc: MarketDoc | null;
   readonly side: "YES" | "NO";
   readonly setSide: (s: "YES" | "NO") => void;
-  readonly tradeMode: "market" | "limit" | "pro";
-  readonly setTradeMode: (m: "market" | "limit" | "pro") => void;
-  readonly margin: string;
-  readonly setMargin: (m: string) => void;
-  readonly leverage: number;
-  readonly setLeverage: (l: number) => void;
+  readonly pledge: string;
+  readonly setPledge: (p: string) => void;
+  readonly ltvPct: number;
+  readonly setLtvPct: (l: number) => void;
   readonly midCents: number | null;
+  readonly decision: AgentDecision | null;
 }): JSX.Element {
-  const ltvPct = Math.min(50, leverage * 5);
+  // The agent's per-market LTV cap, clamped to the protocol-wide 50%
+  // ceiling. When the market isn't in the agent's reviewed set, the
+  // pledge UI disables — the contract floor (§7) only applies above
+  // the gate, not below it.
+  const agentLtvCap = decision !== null ? Math.min(50, Math.round(decision.ltv_max_bps / 100)) : 50;
+  const haircutPct = decision !== null ? decision.haircut_bps / 100 : null;
+  const pledgeNum = Number(pledge) || 0;
+  const p = midCents !== null ? midCents / 100 : 0;
+  const h = haircutPct !== null ? haircutPct / 100 : 0;
+  // V = pledge × p × (1 - h) × LTV  (paper §5; LTV bounded by §7 cap).
+  const borrow = pledgeNum * p * (1 - h) * (ltvPct / 100);
 
   return (
     <aside className="flex h-full flex-col rounded-2xl border border-ink-800 bg-ink-900/60">
-
       <div className="grid grid-cols-2 gap-1.5 border-b border-ink-800 p-2">
         <button
           type="button"
@@ -794,102 +971,61 @@ function TradePanel({
         </button>
       </div>
 
-      <div className="flex items-center gap-3 border-b border-ink-800 px-3 py-2 text-sm">
-        <button
-          type="button"
-          onClick={() => setTradeMode("market")}
-          className={`relative pb-1 ${tradeMode === "market" ? "text-chalk-50" : "text-chalk-400"}`}
-        >
-          Market
-          {tradeMode === "market" && (
-            <span className="absolute -bottom-px left-0 right-0 h-0.5 rounded-full bg-violet-500" />
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() => setTradeMode("limit")}
-          className={`flex items-center gap-1 ${tradeMode === "limit" ? "text-chalk-50" : "text-chalk-400"}`}
-        >
-          Limit
-          <span className="rounded bg-accent-orange/20 px-1 font-mono text-[9px] uppercase text-accent-orange">
-            new
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setTradeMode("pro")}
-          className={`${tradeMode === "pro" ? "text-chalk-50" : "text-chalk-400"}`}
-        >
-          Pro
-        </button>
-      </div>
-
       <BalRow />
 
-
-      <div className="px-3 pt-2">
-        <div className="flex items-baseline gap-2 rounded-md border border-ink-800 bg-ink-950 px-3 py-3">
+      <div className="px-3 pt-3">
+        <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-chalk-400">
+          Pledge amount · USDC notional
+        </p>
+        <div className="mt-1 flex items-baseline gap-2 rounded-md border border-ink-800 bg-ink-950 px-3 py-3">
           <span className="font-display text-2xl text-chalk-400">$</span>
           <input
             type="text"
             inputMode="decimal"
-            value={margin}
+            value={pledge}
             onChange={(e) => {
               const v = e.target.value.replace(/[^0-9.]/g, "");
-              setMargin(v);
+              setPledge(v);
             }}
             className="flex-1 bg-transparent font-display text-3xl font-medium text-chalk-50 outline-none placeholder:text-chalk-500"
             placeholder="0.00"
           />
-          <span className="rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 font-mono text-[11px] text-violet-300">
-            {leverage}X
-          </span>
-        </div>
-
-        <div className="mt-2 grid grid-cols-5 gap-1">
-          {(["10%", "25%", "50%", "75%", "MAX"] as const).map((p) => (
-            <button
-              key={p}
-              type="button"
-              className="rounded-md border border-ink-800 bg-ink-900 py-1 font-mono text-[11px] text-chalk-200 hover:border-violet-500"
-            >
-              {p}
-            </button>
-          ))}
         </div>
       </div>
 
       <div className="px-3 pt-4">
         <div className="flex items-baseline justify-between text-xs">
-          <span className="text-chalk-400">Leverage</span>
+          <span className="text-chalk-400">LTV</span>
           <span className="font-display text-2xl font-semibold">
-            {leverage}
-            <span className="ml-0.5 text-base text-chalk-400">x</span>
+            {ltvPct}
+            <span className="ml-0.5 text-base text-chalk-400">%</span>
           </span>
         </div>
-        <LeverageBars value={leverage} onChange={setLeverage} />
-        <div className="mt-1 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.16em] text-chalk-400">
-          <span className={leverage <= 2 ? "text-violet-300" : ""}>2x</span>
-          <span>3x</span>
-          <span>4x</span>
-          <span>5x</span>
-          <span>6x</span>
-          <span>7x</span>
-          <span>8x</span>
-          <span>9x</span>
-          <span>10x</span>
-        </div>
-        <p className="mt-2 text-[10px] text-chalk-500">≈ {ltvPct}% LTV cap · 50% max</p>
+        <LtvSlider value={ltvPct} onChange={setLtvPct} cap={agentLtvCap} />
+        <p className="mt-2 text-[10px] text-chalk-500">
+          Cap {agentLtvCap}% (agent-set) · liquidates at {LIQUIDATION_LTV_PCT}% LTV
+        </p>
       </div>
 
-      <div className="mt-3 flex items-center justify-between border-t border-ink-800 px-3 py-2 text-xs text-chalk-400">
-        <span className="inline-flex items-center gap-1">
-          <ToggleDot />
-          Take profit / Stop loss
-        </span>
+      <div className="mt-3 border-t border-ink-800 px-3 py-3">
+        <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-chalk-400">
+          You borrow
+        </p>
+        <p className="mt-1 font-display text-2xl font-semibold text-chalk-50">
+          {borrow > 0 ? `$${borrow.toFixed(2)}` : "$0.00"}
+          <span className="ml-1 text-sm font-normal text-chalk-400">USDC</span>
+        </p>
       </div>
 
-      <PledgeCta doc={doc} side={side} marginUsdc={Number(margin) || 0} leverage={leverage} midCents={midCents} />
+      <PledgeCta
+        doc={doc}
+        side={side}
+        pledgeUsdc={pledgeNum}
+        borrowUsdc={borrow}
+        haircutBps={decision?.haircut_bps ?? 0}
+        midCents={midCents}
+        reviewed={decision !== null}
+      />
     </aside>
   );
 }
@@ -912,57 +1048,63 @@ function BalRow(): JSX.Element {
 function PledgeCta({
   doc,
   side,
-  marginUsdc,
-  leverage,
+  pledgeUsdc,
+  borrowUsdc,
+  haircutBps,
   midCents,
+  reviewed,
 }: {
   readonly doc: MarketDoc | null;
   readonly side: "YES" | "NO";
-  readonly marginUsdc: number;
-  readonly leverage: number;
+  readonly pledgeUsdc: number;
+  readonly borrowUsdc: number;
+  readonly haircutBps: number;
   readonly midCents: number | null;
+  readonly reviewed: boolean;
 }): JSX.Element {
   const { connected, mode, openConnect, addDemoPledge, balanceUsdc } = useWallet();
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState<string | null>(null);
 
-  async function pledge(): Promise<void> {
+  async function execute(): Promise<void> {
     if (doc === null || midCents === null) return;
     if (mode !== "demo") return;
+    if (borrowUsdc <= 0) return;
     setSubmitting(true);
-    // Tiny perceptible delay so the button has motion.
     await new Promise((r) => setTimeout(r, 450));
-    const notional = Math.max(1, marginUsdc * leverage);
-    const principal = Math.round(notional * 0.5 * 100) / 100; // 50% LTV
-    const haircutBps = 625;
+    const principal = Math.round(borrowUsdc * 100) / 100;
     addDemoPledge({
       conditionId: doc.conditionId,
       question: doc.question,
       side,
       entryCents: midCents,
-      notionalUsdc: notional,
+      notionalUsdc: pledgeUsdc,
       principalUsdc: principal,
       haircutBps,
     });
     setSubmitting(false);
-    setDone(`+${fmtUsdc(principal)} borrowed against ${fmtUsdc(notional)} ${side}`);
+    setDone(`+${fmtUsdc(principal)} borrowed against ${fmtUsdc(pledgeUsdc)} ${side}`);
     setTimeout(() => setDone(null), 4500);
   }
 
-  const insufficient = connected && marginUsdc > balanceUsdc;
-  const tooSmall = connected && marginUsdc <= 0;
+  const insufficient = connected && pledgeUsdc > balanceUsdc;
+  const tooSmall = connected && pledgeUsdc <= 0;
   const label = !connected
     ? "Sign in"
-    : insufficient
-      ? "Insufficient balance"
-      : tooSmall
-        ? `Enter margin to pledge ${side}`
-        : submitting
-          ? "Pledging…"
-          : `Pledge ${side}`;
+    : !reviewed
+      ? "Awaiting agent review"
+      : insufficient
+        ? "Insufficient balance"
+        : tooSmall
+          ? `Enter pledge to borrow ${side}`
+          : submitting
+            ? "Pledging…"
+            : `Pledge ${side}`;
 
-  const disabled = connected && (insufficient || tooSmall || submitting);
-  const onClick = connected ? () => void pledge() : openConnect;
+  const disabled =
+    connected && (!reviewed || insufficient || tooSmall || submitting);
+  const onClick = connected ? () => void execute() : openConnect;
+  const haircutPctText = (haircutBps / 100).toFixed(2);
 
   return (
     <div className="mt-auto p-3">
@@ -983,7 +1125,7 @@ function PledgeCta({
       )}
       {midCents !== null && done === null && (
         <p className="mt-2 text-center font-mono text-[10px] uppercase tracking-[0.16em] text-chalk-500">
-          mark {midCents}¢ · {side} · {mode === "demo" ? "demo" : "agent-vetted"}
+          mark {midCents}¢ · haircut {haircutPctText}% · liquidates at {LIQUIDATION_LTV_PCT}% LTV
         </p>
       )}
       {doc?.stale === true && (
@@ -995,31 +1137,44 @@ function PledgeCta({
   );
 }
 
-function LeverageBars({
+// LTV slider: 5%..50% in 5% increments, with the agent's per-market
+// cap (paper §5 ltv_max_bps) hard-stopping the right edge. Bars beyond
+// the cap render as disabled rather than disappearing so the cap is
+// visually legible to lenders.
+function LtvSlider({
   value,
   onChange,
+  cap,
 }: {
   readonly value: number;
   readonly onChange: (n: number) => void;
+  readonly cap: number;
 }): JSX.Element {
-  const N = 36;
-  const heights = useMemo(() => Array.from({ length: N }, (_, i) => 8 + ((i * 13) % 40)), []);
+  const STEPS = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50] as const;
+  const heights = useMemo(
+    () => STEPS.map((_, i) => 12 + ((i * 7) % 28)),
+    [],
+  );
   return (
-    <div className="mt-2 flex h-12 items-end gap-[1px]">
-      {heights.map((h, i) => {
-        const stop = Math.round(((value - 2) / 8) * (N - 1));
-        const filled = i <= stop;
+    <div className="mt-2 flex h-12 items-end gap-1">
+      {STEPS.map((step, i) => {
+        const filled = step <= value;
+        const above = step > cap;
         return (
           <button
-            key={i}
+            key={step}
             type="button"
-            onClick={() => {
-              const v = 2 + Math.round((i / (N - 1)) * 8);
-              onChange(v);
-            }}
-            aria-label={`leverage ${i}`}
-            style={{ height: `${h}px` }}
-            className={`flex-1 rounded-sm transition ${filled ? "bg-violet-500" : "bg-ink-800"}`}
+            disabled={above}
+            onClick={() => onChange(Math.min(step, cap))}
+            aria-label={`LTV ${step}%`}
+            style={{ height: `${heights[i] ?? 16}px` }}
+            className={`flex-1 rounded-sm transition ${
+              above
+                ? "bg-ink-800/40"
+                : filled
+                  ? "bg-violet-500"
+                  : "bg-ink-800 hover:bg-ink-700"
+            }`}
           />
         );
       })}
@@ -1118,7 +1273,7 @@ function LiveMarquee({ currentCid }: { readonly currentCid: string }): JSX.Eleme
 
 function BottomTabs(): JSX.Element {
   const [tab, setTab] = useState<string>("Positions");
-  const TABS = ["Positions", "Open Orders", "History", "Market summary", "Market trades"] as const;
+  const TABS = ["Positions", "History"] as const;
   const { positions, mode, connected } = useWallet();
 
   return (
@@ -1322,12 +1477,5 @@ function CalendarIcon(): JSX.Element {
       <rect x={2} y={3} width={10} height={9} rx={1} />
       <path d="M2 6h10M5 1.5v3M9 1.5v3" />
     </svg>
-  );
-}
-function ToggleDot(): JSX.Element {
-  return (
-    <span className="inline-flex h-3 w-5 items-center rounded-full bg-ink-700">
-      <span className="ml-px h-2.5 w-2.5 rounded-full bg-chalk-400" />
-    </span>
   );
 }
