@@ -18,6 +18,7 @@ import type { ReasoningLoop } from "../../loops/types.js";
 import type { LoanRegistry } from "../../services/loan-registry.js";
 import type { MarketsCache } from "../../services/markets-cache.js";
 import type { FileEventLog } from "../../events-store.js";
+import type { OperationalReader } from "../../services/operational-snapshot.js";
 
 import { WATCHED_MARKETS } from "../../services/watched-markets.js";
 
@@ -25,6 +26,7 @@ export interface RegisterStateRouteOpts {
   readonly marketsCache: MarketsCache;
   readonly loanRegistry: LoanRegistry;
   readonly log: FileEventLog;
+  readonly operationalReader: OperationalReader;
   readonly loops: {
     readonly credit: ReasoningLoop;
     readonly model: ReasoningLoop;
@@ -187,11 +189,18 @@ export async function registerStateRoute(
       probation_n,
       positions,
       earned_today_usdc: (Number(earned_today_usdc6) / 1_000_000).toFixed(2),
-      // Static stub until the operational loop emits explicit treasury
-      // alerts in the dev fixtures. The state-route consumer reads
-      // this as authoritative; flipping to a real reducer is a 5-line
-      // change once `op.treasury_alert` events appear in the log.
-      runway_days: 330,
+      // Real runway: balance / weekly_spend × 7. Reads from the cached
+      // last operational snapshot (refreshed every hour by the loop).
+      // null until first tick lands; clamped to a 4-week ceiling so the
+      // UI doesn't show absurd numbers when treasury is small.
+      runway_days: ((): number | null => {
+        const snap = opts.operationalReader.latest();
+        if (snap === null) return null;
+        const bal = Number(BigInt(snap.treasury_balance_usdc));
+        const wk = Number(BigInt(snap.weekly_spend_usdc));
+        if (wk <= 0) return null;
+        return Math.floor((bal / wk) * 7);
+      })(),
       last_decision: last_decision === null
         ? null
         : {

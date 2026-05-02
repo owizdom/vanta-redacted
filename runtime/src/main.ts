@@ -47,6 +47,10 @@ import { registerMarketsRoutes } from "./http/routes/markets.js";
 import { registerServiceRoutes } from "./http/routes/services.js";
 import { registerStateRoute } from "./http/routes/state.js";
 import { createMarkLoop } from "./services/mark-loop.js";
+import {
+  createOperationalReader,
+  type OperationalReader,
+} from "./services/operational-snapshot.js";
 import { installX402Hook, type X402RouteConfig } from "./services/x402.js";
 
 import { createCreditLoop, type ActiveLoanView } from "./loops/credit.js";
@@ -167,6 +171,9 @@ async function stubReplayDataset(): Promise<{
 }
 
 async function stubOperationalSnapshot(): Promise<OperationalSnapshot> {
+  // Retained only for the smoke entrypoint / unit tests. Production
+  // wiring uses createOperationalReader (real chain reads). See main()
+  // below for the live binding.
   return {
     treasury_balance_usdc: "1000000000000",
     weekly_spend_usdc: "5000000000",
@@ -320,9 +327,18 @@ async function startMain(): Promise<void> {
     fetchDataset: stubReplayDataset,
     tickSeconds: 7 * 24 * 60 * 60,
   });
+  // Real operational snapshot — reads treasury USDC, native balances,
+  // and live gas prices from chain. Replaces the stub. See
+  // services/operational-snapshot.ts for the (honest) cost calibration.
+  const operationalReader: OperationalReader = createOperationalReader({
+    treasuryAddress: boot.treasury.address,
+    adminAddress: boot.origination.address,
+    baseRpcUrl: config.loanBookRpcUrl,
+    amoyRpcUrl: config.amoyRpcUrl,
+  });
   const operationalLoop = createOperationalLoop({
     ctx,
-    observe: () => stubOperationalSnapshot(),
+    observe: () => operationalReader.snapshot(),
     tickSeconds: 60 * 60,
   });
 
@@ -378,12 +394,20 @@ async function startMain(): Promise<void> {
     marketsCache: boot.marketsCache,
     loanRegistry: boot.loanRegistry,
     log: boot.log,
+    operationalReader,
     loops: {
       credit: creditLoop,
       model: modelLoop,
       operational: operationalLoop,
       onboarding: onboardingLoop,
     },
+  });
+
+  // Warm the operational reader with one snapshot before the loop's
+  // first hourly tick — so /api/state's runway_days is real on the
+  // first poll instead of returning null until the loop catches up.
+  void operationalReader.snapshot().catch(() => {
+    /* RPC may be transient; loop will retry */
   });
 
   await app.listen({ port: config.port, host: config.host });
