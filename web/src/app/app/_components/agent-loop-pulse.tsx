@@ -53,25 +53,25 @@ function StatusPill({
   readonly etaLabel: string | null;
 }): JSX.Element {
   return (
-    <div className="flex items-center gap-2 rounded-md border border-[#2c2c2e] bg-[#1c1c1e] px-3 py-1.5">
+    <div className="flex items-center gap-2 rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5">
       <span className="relative flex h-1.5 w-1.5">
         {active && (
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-40" />
         )}
         <span
           className={`relative inline-flex h-1.5 w-1.5 rounded-full ${
-            active ? "bg-violet-400" : "bg-[#48484a]"
+            active ? "bg-violet-400" : "bg-ink-700"
           }`}
         />
       </span>
-      <span className="text-[11px] font-medium uppercase tracking-wide text-[#8e8e93]">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-chalk-200">
         {label}
       </span>
-      <span className="text-[11px] font-semibold text-[#e5e5ea]">{cadence}</span>
-      <span className="text-[#48484a]">·</span>
-      <span className="font-mono text-[11px] text-[#8e8e93]">{ageLabel}</span>
+      <span className="text-[11px] font-semibold text-chalk-50">{cadence}</span>
+      <span className="text-chalk-600">·</span>
+      <span className="font-mono text-[11px] text-chalk-200">{ageLabel}</span>
       {etaLabel !== null && (
-        <span className="hidden font-mono text-[11px] text-[#636366] sm:inline">{etaLabel}</span>
+        <span className="hidden font-mono text-[11px] text-chalk-400 sm:inline">{etaLabel}</span>
       )}
     </div>
   );

@@ -114,7 +114,7 @@ function decisionTypeLabel(t: string): string {
 function DecisionIcon({ hasDecision }: { readonly hasDecision: boolean }): JSX.Element {
   if (!hasDecision) {
     return (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#636366" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7e8694" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
         <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
       </svg>
@@ -138,13 +138,13 @@ function HeroStat({
 }): JSX.Element {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-[#636366]">
+      <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-chalk-400">
         {label}
       </span>
-      <span className="text-lg font-semibold text-[#e5e5ea]">
+      <span className="text-lg font-semibold text-chalk-50">
         {value}
         {suffix !== undefined && (
-          <span className="font-normal text-[#636366]">{suffix}</span>
+          <span className="font-normal text-chalk-400">{suffix}</span>
         )}
       </span>
     </div>
@@ -155,7 +155,7 @@ function MetaItem({
   label,
   value,
   separator = false,
-  valueClass = "text-[#8e8e93]",
+  valueClass = "text-chalk-200",
 }: {
   readonly label: string;
   readonly value: string | null;
@@ -164,8 +164,8 @@ function MetaItem({
 }): JSX.Element {
   return (
     <div className="flex items-center gap-1.5">
-      {separator && <span aria-hidden className="mr-1 text-[#48484a]">·</span>}
-      <span className="text-[10px] font-medium uppercase tracking-widest text-[#636366]">{label}</span>
+      {separator && <span aria-hidden className="mr-1 text-chalk-600">·</span>}
+      <span className="text-[10px] font-medium uppercase tracking-widest text-chalk-400">{label}</span>
       <span className={`text-[10px] font-semibold ${valueClass}`}>{value ?? "—"}</span>
     </div>
   );
@@ -237,12 +237,12 @@ export function AgentBand(): JSX.Element {
   return (
     <section
       aria-label="VANTA — agent posture"
-      className="relative overflow-hidden rounded-2xl border border-[#1c1c1e] bg-[#0d0d0f] shadow-2xl shadow-black/50"
+      className="relative overflow-hidden rounded-2xl border border-ink-800 bg-ink-900 shadow-2xl shadow-black/50"
     >
       {/* Top hairline gradient */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#2c2c2e] to-transparent"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-ink-700 to-transparent"
       />
 
       <div className="p-6 sm:p-8">
@@ -254,15 +254,15 @@ export function AgentBand(): JSX.Element {
               <span className="relative inline-flex h-2 w-2 rounded-full bg-violet-500" />
             </span>
             <div className="flex items-baseline gap-2">
-              <span className="text-sm font-bold uppercase tracking-[0.15em] text-white">
+              <span className="text-sm font-bold uppercase tracking-[0.15em] text-chalk-50">
                 Vanta
               </span>
-              <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-[#636366]">
+              <span className="text-[10px] font-medium uppercase tracking-[0.2em] text-chalk-400">
                 Right now
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-[#48484a]">
+          <div className="flex items-center gap-2 text-[11px] text-chalk-600">
             <span className="relative inline-flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-30" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet-500" />
@@ -274,10 +274,10 @@ export function AgentBand(): JSX.Element {
         {/* ─── Hero metrics ────────────────────────────────── */}
         <div className="mb-7 flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
           <div className="flex flex-col gap-1">
-            <span className="text-[11px] font-medium uppercase tracking-[0.15em] text-[#636366]">
+            <span className="text-[11px] font-medium uppercase tracking-[0.15em] text-chalk-400">
               Earned today
             </span>
-            <span className="font-display text-4xl font-light tracking-tight text-white sm:text-5xl">
+            <span className="font-display text-4xl font-light tracking-tight text-chalk-50 sm:text-5xl">
               <span className="font-normal text-violet-400">$</span>
               {earned}
             </span>
@@ -298,26 +298,26 @@ export function AgentBand(): JSX.Element {
         </div>
 
         {/* Divider */}
-        <div className="mb-6 h-px bg-[#1c1c1e]" />
+        <div className="mb-6 h-px bg-ink-800" />
 
         {/* ─── Last decision ────────────────────────────────── */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#48484a]">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-chalk-600">
               Last decision
             </span>
-            <span className="text-[10px] text-[#636366]">
+            <span className="text-[10px] text-chalk-400">
               {lastDecision === null ? "—" : `${fmtAge(lastDecision.age_s)} ago`}
             </span>
           </div>
           <div
             className={`flex items-center gap-3 rounded-lg border px-4 py-3.5 ${
               lastDecision === null
-                ? "border-dashed border-[#1c1c1e] bg-[#111113]"
-                : "border-[#1c1c1e] bg-[#111113]"
+                ? "border-dashed border-ink-800 bg-ink-950"
+                : "border-ink-800 bg-ink-950"
             }`}
           >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#1c1c1e]">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink-800">
               <DecisionIcon hasDecision={lastDecision !== null} />
             </div>
             <div className="flex min-w-0 flex-1 items-baseline gap-2">
@@ -328,7 +328,7 @@ export function AgentBand(): JSX.Element {
               )}
               <span
                 className={`truncate text-sm font-medium ${
-                  lastDecision === null ? "text-[#636366]" : "text-[#e5e5ea]"
+                  lastDecision === null ? "text-chalk-400" : "text-chalk-50"
                 }`}
               >
                 {decisionSummary(lastDecision)}
@@ -337,7 +337,7 @@ export function AgentBand(): JSX.Element {
             {lastDecision !== null && (
               <Link
                 href={`/events?id=${lastDecision.id}`}
-                className="shrink-0 whitespace-nowrap rounded-md border border-[#2c2c2e] bg-[#1c1c1e] px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide text-[#8e8e93] transition hover:border-violet-500/40 hover:text-[#e5e5ea]"
+                className="shrink-0 whitespace-nowrap rounded-md border border-ink-700 bg-ink-800 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wide text-chalk-200 transition hover:border-violet-500/40 hover:text-chalk-50"
               >
                 view chain →
               </Link>
@@ -347,7 +347,7 @@ export function AgentBand(): JSX.Element {
       </div>
 
       {/* ─── Bottom meta bar ─────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[#1c1c1e] bg-[#0a0a0c] px-6 py-4 sm:px-8">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-ink-800 bg-ink-950 px-6 py-4 sm:px-8">
         <MetaItem label="Image" value={shortHex(att.enclave_identity_hash)} />
         <MetaItem label="Genesis" value={genesisShort ?? "—"} separator />
         <MetaItem label="KMS" value={att.kms_kind ?? "—"} separator />
@@ -358,7 +358,7 @@ export function AgentBand(): JSX.Element {
           separator
           valueClass="text-violet-400"
         />
-        <span className="text-[10px] font-medium uppercase tracking-widest text-[#48484a]">
+        <span className="text-[10px] font-medium uppercase tracking-widest text-chalk-600">
           ago
         </span>
       </div>
