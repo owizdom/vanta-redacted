@@ -64,10 +64,13 @@ const RawConfig = z.object({
   // boot, then continues normally. Idempotent: if vault.loanBook()
   // already equals the configured LoanBook address, the step is a no-op.
   BOOT_AND_WIRE: z.coerce.boolean().default(false),
-  // Inference layer. Both can be empty in local-only mode; calls that
-  // need inference will fail closed at request time, not at boot.
-  AI_GATEWAY_BASE_URL: z.string().default(""),
-  AI_GATEWAY_API_KEY: z.string().default(""),
+  // Inference layer — EigenCloud AI Gateway only. Auth is handled by
+  // @layr-labs/ai-gateway-provider via TEE attestation: KMS_SERVER_URL +
+  // KMS_PUBLIC_KEY are auto-injected when running inside EigenCompute,
+  // and the provider exchanges them for short-lived JWTs per call. No
+  // bearer tokens, no operator-held keys; billed to the agent's account.
+  // Outside EigenCompute (local dev) inference fails closed at request
+  // time with `no_credentials`, not at boot.
   INFERENCE_MODEL_ANTHROPIC: z.string().default("anthropic/claude-sonnet-4-6"),
   INFERENCE_MODEL_OPENAI: z.string().default("openai/gpt-5"),
   INFERENCE_MODEL_GOOGLE: z.string().default("google/gemini-2.5-pro"),
@@ -141,10 +144,6 @@ export interface InferenceModelSlugs {
 }
 
 export interface InferenceConfig {
-  /** Vercel AI Gateway base URL (e.g. `https://ai-gateway.vercel.sh/v1`). Empty = unset. */
-  readonly gatewayBaseUrl: string;
-  /** Vercel AI Gateway bearer token. Empty = unset. */
-  readonly gatewayApiKey: string;
   readonly models: InferenceModelSlugs;
 }
 
@@ -298,8 +297,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     skipContractChecks: raw.SKIP_CONTRACT_CHECKS,
     bootAndWire: raw.BOOT_AND_WIRE,
     inference: {
-      gatewayBaseUrl: raw.AI_GATEWAY_BASE_URL,
-      gatewayApiKey: raw.AI_GATEWAY_API_KEY,
       models: {
         anthropic: raw.INFERENCE_MODEL_ANTHROPIC,
         openai: raw.INFERENCE_MODEL_OPENAI,

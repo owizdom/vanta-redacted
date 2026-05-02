@@ -44,6 +44,8 @@ import {
   type VantaEvent,
 } from "@vanta/events";
 import { asSha256Hex } from "@vanta/tee";
+import { eigen } from "@layr-labs/ai-gateway-provider";
+import { generateText } from "ai";
 
 import type { InferenceConfig } from "../config.js";
 
@@ -333,16 +335,28 @@ function pickModelSlug(
 // Backend selection
 // ---------------------------------------------------------------------------
 
+/**
+ * Backend choice — `null` when KMS attestation env vars aren't set
+ * (local dev outside EigenCompute). Inside EigenCompute, `KMS_SERVER_URL`
+ * and `KMS_PUBLIC_KEY` are auto-injected by the launcher and the
+ * `eigen` provider auto-fetches a JWT against them per call.
+ */
 interface BackendChoice {
-  readonly baseUrl: string;
-  readonly apiKey: string;
+  readonly kind: "eigen";
 }
 
-function chooseBackend(cfg: InferenceConfig): BackendChoice | null {
-  if (cfg.gatewayBaseUrl.length === 0 || cfg.gatewayApiKey.length === 0) {
-    return null;
+function chooseBackend(_cfg: InferenceConfig): BackendChoice | null {
+  const kmsServerURL = process.env["KMS_SERVER_URL"];
+  const kmsPublicKey = process.env["KMS_PUBLIC_KEY"];
+  const jwtOverride = process.env["KMS_AUTH_JWT"];
+  if (
+    (typeof kmsServerURL === "string" && kmsServerURL.length > 0 &&
+      typeof kmsPublicKey === "string" && kmsPublicKey.length > 0) ||
+    (typeof jwtOverride === "string" && jwtOverride.length > 0)
+  ) {
+    return { kind: "eigen" };
   }
-  return { baseUrl: cfg.gatewayBaseUrl, apiKey: cfg.gatewayApiKey };
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,16 +377,25 @@ interface InvokeArgs {
   readonly messages: readonly InferenceMessage[];
   readonly maxTokens: number;
   readonly temperature: number;
+  /** Retained for symmetry; the eigen provider has its own internal fetch. */
   readonly fetchImpl: typeof fetch;
 }
 
 async function invokeBackend(args: InvokeArgs): Promise<ProviderCallResult> {
-  return invokeAIGateway(args);
+  return invokeEigenGateway(args);
 }
 
-async function invokeAIGateway(args: InvokeArgs): Promise<ProviderCallResult> {
-  // OpenAI-compatible chat-completions surface.
-  const messages: Array<{ role: string; content: string }> = [];
+/**
+ * Drive the Vercel AI SDK against the EigenCloud Eigen Gateway. Auth
+ * is handled inside `@layr-labs/ai-gateway-provider` via TEE
+ * attestation (KMS_SERVER_URL + KMS_PUBLIC_KEY auto-injected at boot)
+ * — no manual API keys, billed to the agent's own EigenCompute account.
+ *
+ * This is the T1 Direct inference path: every call is a real, agent-
+ * funded inference. No bearer-token gateway, no operator-held keys.
+ */
+async function invokeEigenGateway(args: InvokeArgs): Promise<ProviderCallResult> {
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
   if (args.system.length > 0) {
     messages.push({ role: "system", content: args.system });
   }
@@ -380,42 +403,25 @@ async function invokeAIGateway(args: InvokeArgs): Promise<ProviderCallResult> {
     messages.push({ role: m.role, content: m.content });
   }
 
-  const url = joinUrl(args.backend.baseUrl, "/chat/completions");
-  const res = await args.fetchImpl(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${args.backend.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: args.model,
+  try {
+    const result = await generateText({
+      model: eigen(args.model),
       messages,
-      max_tokens: args.maxTokens,
+      maxOutputTokens: args.maxTokens,
       temperature: args.temperature,
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await safeReadText(res);
-    throw new InferenceError("http_error", `gateway returned ${String(res.status)}`, {
-      provider: args.provider,
-      status: String(res.status),
-      excerpt: text.slice(0, 256),
     });
+    return {
+      text: result.text,
+      promptTokens: result.usage.inputTokens ?? 0,
+      completionTokens: result.usage.outputTokens ?? 0,
+    };
+  } catch (err: unknown) {
+    throw new InferenceError(
+      "http_error",
+      err instanceof Error ? err.message : String(err),
+      { provider: args.provider, model: args.model },
+    );
   }
-
-  type GatewayResp = {
-    choices?: ReadonlyArray<{ message?: { content?: string } }>;
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
-  };
-  const json = (await res.json()) as GatewayResp;
-  const text = json.choices?.[0]?.message?.content ?? "";
-
-  return {
-    text,
-    promptTokens: json.usage?.prompt_tokens ?? 0,
-    completionTokens: json.usage?.completion_tokens ?? 0,
-  };
 }
 
 // ---------------------------------------------------------------------------

@@ -371,11 +371,17 @@ async function startMain(): Promise<void> {
   // Real Polymarket questions go through the LLM judge → resolution-
   // criteria clarity score → gate floor + agent reasoning → signed
   // `loop.onboard_decision` + sibling `reasoning.trace`. The gateway
-  // judge is wired iff AI_GATEWAY_BASE_URL + AI_GATEWAY_API_KEY are set;
-  // otherwise the deterministic stub keeps the loop honest in offline
-  // mode.
+  // judge is wired iff KMS_SERVER_URL + KMS_PUBLIC_KEY are set (the
+  // EigenCompute attestation env), since `@layr-labs/ai-gateway-provider`
+  // needs them to mint per-call JWTs. Outside the TEE the deterministic
+  // stub keeps the loop honest in offline mode.
+  const eigenAuthReady =
+    typeof process.env["KMS_SERVER_URL"] === "string" &&
+    process.env["KMS_SERVER_URL"].length > 0 &&
+    typeof process.env["KMS_PUBLIC_KEY"] === "string" &&
+    process.env["KMS_PUBLIC_KEY"].length > 0;
   const judge: JudgeFn | undefined =
-    config.inference.gatewayBaseUrl.length > 0 && config.inference.gatewayApiKey.length > 0
+    eigenAuthReady
       ? createGatewayJudge({
           call: async (req) => {
             // Spread the optional fields only when present —
