@@ -36,7 +36,7 @@ const VANTA_VAULT_AMOY_ADDRESS = "0x68f57D4F531fBbbd319F42Ca94964C0d3FbC063a" as
 // like the runtime is broken.
 const PROD_TEE_ADDRESS = "0x54b52EcEECfbe9a82B821Bb20A0dDcb130cb4AD2" as const;
 const PROD_LP_VAULT = "0x68f57D4F531fBbbd319F42Ca94964C0d3FbC063a" as const;
-const PROD_LOAN_BOOK = "0x1008750145a24101Dda29F1176a0529662500024" as const;
+const PROD_LOAN_BOOK = "0x3542B73923Ba4fFE9482E065ddD5E460f8961d24" as const;
 
 export async function registerIdentityRoute(app: FastifyInstance): Promise<void> {
   app.get("/api/identity-pin", async () => {
