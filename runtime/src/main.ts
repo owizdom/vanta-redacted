@@ -337,12 +337,15 @@ async function startMain(): Promise<void> {
     config.inference.gatewayBaseUrl.length > 0 && config.inference.gatewayApiKey.length > 0
       ? createGatewayJudge({
           call: async (req) => {
+            // Spread the optional fields only when present —
+            // exactOptionalPropertyTypes rejects T | undefined where the
+            // target type asks for T or absence.
             const r = await boot.inference.call({
               role: req.role,
-              system: req.system,
               messages: req.messages,
-              maxTokens: req.maxTokens,
-              temperature: req.temperature,
+              ...(req.system !== undefined ? { system: req.system } : {}),
+              ...(req.maxTokens !== undefined ? { maxTokens: req.maxTokens } : {}),
+              ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
             });
             return { text: r.text, model: r.model, latencyMs: r.latencyMs };
           },
@@ -364,7 +367,8 @@ async function startMain(): Promise<void> {
     ctx,
     fetchCandidates,
     fetchExposure: stubFetchExposure,
-    judge,
+    // Only attach the judge when present (exactOptionalPropertyTypes).
+    ...(judge !== undefined ? { judge } : {}),
     tickSeconds: 6 * 60 * 60,
   });
 
