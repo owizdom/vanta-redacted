@@ -20,7 +20,7 @@ import type { FastifyInstance } from "fastify";
 // EigenCompute App ID — pinned in code rather than env so a misconfigured
 // deploy can't quietly point the launcher at a different app. Updated
 // whenever we redeploy the runtime image to a new ecloud app id.
-const EIGEN_APP_ID = "0xaa4875Ff1514b8227Dc61466473c0B1E4C83CAf9" as const;
+const EIGEN_APP_ID = "0x98Ff56d84B31F44DacB4688828Dc19CD85393033" as const;
 
 // VantaVault on Polygon Amoy — same `0xD9AF…f076` byte pattern as the
 // Base-Sepolia LpVault but on a different chain. Surfaced as a "see also"
