@@ -76,19 +76,80 @@ const SAMPLE: readonly MarketRow[] = [
   },
 ];
 
+interface FilterCtx {
+  readonly favs: ReadonlySet<string>;
+  readonly watched: ReadonlySet<string>;
+}
+
 const TABS = [
-  { key: "favorites", label: "Favorites", icon: "bookmark", filter: (m: MarketRow, fav: ReadonlySet<string>) => fav.has(m.conditionId) },
-  { key: "live", label: "Live", icon: null, filter: (_m: MarketRow) => true },
-  { key: "all", label: "All", icon: null, filter: (_m: MarketRow) => true },
-  { key: "politics", label: "Politics", icon: null, filter: (m: MarketRow) => /nomination|election|president|senate/i.test(m.question) },
-  { key: "sports", label: "Sports", icon: null, filter: (m: MarketRow) => /world cup|fifa|nba|champion/i.test(m.question) },
-  { key: "crypto", label: "Crypto", icon: null, filter: (m: MarketRow) => /bitcoin|eth|crypto/i.test(m.question) },
-  { key: "macro", label: "Macro", icon: null, filter: (m: MarketRow) => /fed|rate|fomc|cpi/i.test(m.question) },
-  { key: "tech", label: "Tech", icon: null, filter: (m: MarketRow) => /ai|llm|openai/i.test(m.question) },
+  { key: "favorites", label: "Favorites", icon: "bookmark", filter: (m: MarketRow, ctx: FilterCtx) => ctx.favs.has(m.conditionId) },
+  { key: "live", label: "Live", icon: null, filter: (m: MarketRow, ctx: FilterCtx) => ctx.watched.has(m.conditionId) },
+  { key: "all", label: "All", icon: null, filter: (_m: MarketRow, _ctx: FilterCtx) => true },
+  { key: "politics", label: "Politics", icon: null, filter: (m: MarketRow, _ctx: FilterCtx) => /nomination|election|president|senate|congress|democrat|republican/i.test(m.question) },
+  { key: "sports", label: "Sports", icon: null, filter: (m: MarketRow, _ctx: FilterCtx) => /world cup|fifa|nba|nfl|mlb|champion|premier league|stanley cup|super bowl/i.test(m.question) },
+  { key: "crypto", label: "Crypto", icon: null, filter: (m: MarketRow, _ctx: FilterCtx) => /bitcoin|btc|eth\b|ethereum|solana|sol\b|xrp|crypto|stablecoin|memecoin|altcoin/i.test(m.question) },
+  { key: "macro", label: "Macro", icon: null, filter: (m: MarketRow, _ctx: FilterCtx) => /fed |rate|fomc|cpi|inflation|gdp|recession|tariff|interest rate/i.test(m.question) },
+  { key: "tech", label: "Tech", icon: null, filter: (m: MarketRow, _ctx: FilterCtx) => /\bai\b|llm|openai|anthropic|gemini|nvidia|x\.com|tesla|spacex|apple|google/i.test(m.question) },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
 type SortKey = "mid" | "volume" | "tvl" | "delta" | "autoClose";
+
+interface AgentDecision {
+  readonly cid: string;
+  readonly haircut_bps: number;
+  readonly ltv_max_bps: number;
+  readonly decision: string;
+  readonly reviewed_at_unix_ms: number;
+}
+
+interface RawMarket {
+  conditionId: string;
+  question: string | null;
+  mid?: { yes: string | null; no: string | null };
+  volume_24h_usd?: number | null;
+  volume_usd?: number | null;
+  liquidity_usd?: number | null;
+  one_day_price_change?: number | null;
+  end_date_iso?: string | null;
+}
+
+function rawToRow(m: RawMarket): MarketRow | null {
+  if (m.question === null) return null;
+  const midYes =
+    m.mid?.yes !== null && m.mid?.yes !== undefined && m.mid.yes !== ""
+      ? Number(m.mid.yes)
+      : 0;
+  // Polymarket reports oneDayPriceChange in dollars (e.g. 0.012).
+  // Convert to a price-relative percentage so 1.2¢ change at 12¢ mid
+  // shows as +10%.
+  const dpct =
+    m.one_day_price_change != null && midYes > 0
+      ? (m.one_day_price_change / midYes) * 100
+      : 0;
+  const closeTs =
+    m.end_date_iso != null && m.end_date_iso !== ""
+      ? Date.parse(m.end_date_iso)
+      : 0;
+  return {
+    conditionId: m.conditionId,
+    question: m.question,
+    leverage: "50% LTV",
+    midCents: Math.round(midYes * 100),
+    volume24h: m.volume_24h_usd ?? 0,
+    tvl: m.liquidity_usd ?? 0,
+    delta24h: dpct,
+    autoCloseLabel:
+      closeTs > 0
+        ? new Date(closeTs).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+          })
+        : "—",
+    autoCloseTs: closeTs,
+  };
+}
 
 export function MarketsTable(): JSX.Element {
   const [tab, setTab] = useState<TabKey>("all");
@@ -100,64 +161,68 @@ export function MarketsTable(): JSX.Element {
     key: "volume",
     dir: "desc",
   });
+  const [watchedCids, setWatchedCids] = useState<ReadonlySet<string>>(new Set());
+  const [agentDecisions, setAgentDecisions] = useState<
+    ReadonlyMap<string, AgentDecision>
+  >(new Map());
 
+  // Single pull function: fetches the corpus (top-N from gamma via the
+  // Next route handler), the agent's watched set, and the agent's
+  // per-market decisions in parallel. Then merges:
+  //   - corpus is the broad-discovery base; cids dedupe
+  //   - watched entries win on dedupe (preserve any future watched-only
+  //     decoration like short_name / owner_label)
+  //   - agentDecisions is a separate map keyed by cid, looked up at
+  //     render time so we don't refetch the merged list when a tick lands
   useEffect(() => {
     let cancelled = false;
     async function pull(): Promise<void> {
       try {
-        const r = await fetch("/api/runtime/markets/watched", { cache: "no-store" });
-        if (!r.ok) return;
-        const j = (await r.json()) as {
-          markets?: Array<{
-            conditionId: string;
-            question: string | null;
-            mid?: { yes: string | null; no: string | null };
-            volume_24h_usd?: number | null;
-            volume_usd?: number | null;
-            liquidity_usd?: number | null;
-            one_day_price_change?: number | null;
-            end_date_iso?: string | null;
-          }>;
-        };
+        const [corpusR, watchedR, stateR] = await Promise.all([
+          fetch("/api/markets", { cache: "no-store" }),
+          fetch("/api/runtime/markets/watched", { cache: "no-store" }),
+          fetch("/api/runtime/state", { cache: "no-store" }),
+        ]);
+
+        const corpus = corpusR.ok
+          ? ((await corpusR.json()) as { markets?: RawMarket[] }).markets ?? []
+          : [];
+        const watched = watchedR.ok
+          ? ((await watchedR.json()) as { markets?: RawMarket[] }).markets ?? []
+          : [];
+        const state = stateR.ok
+          ? ((await stateR.json()) as {
+              market_decisions?: AgentDecision[];
+            })
+          : { market_decisions: [] };
+
         if (cancelled) return;
-        const live = (j.markets ?? [])
-          .filter((m) => m.question !== null)
-          .map((m) => {
-            const midYes =
-              m.mid?.yes !== null && m.mid?.yes !== undefined && m.mid.yes !== ""
-                ? Number(m.mid.yes)
-                : 0;
-            // Polymarket reports oneDayPriceChange in dollars (e.g. 0.012).
-            // Convert to a price-relative percentage so 1.2¢ change at 12¢ mid
-            // shows as +10%.
-            const dpct =
-              m.one_day_price_change != null && midYes > 0
-                ? (m.one_day_price_change / midYes) * 100
-                : 0;
-            const closeTs =
-              m.end_date_iso != null && m.end_date_iso !== ""
-                ? Date.parse(m.end_date_iso)
-                : 0;
-            return {
-              conditionId: m.conditionId,
-              question: m.question ?? "—",
-              leverage: "50% LTV",
-              midCents: Math.round(midYes * 100),
-              volume24h: m.volume_24h_usd ?? 0,
-              tvl: m.liquidity_usd ?? 0,
-              delta24h: dpct,
-              autoCloseLabel:
-                closeTs > 0
-                  ? new Date(closeTs).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })
-                  : "—",
-              autoCloseTs: closeTs,
-            };
-          });
-        if (live.length > 0) setRows(live);
+
+        // Merge: corpus first, then watched overrides by cid.
+        const byCid = new Map<string, MarketRow>();
+        for (const m of corpus) {
+          const r = rawToRow(m);
+          if (r !== null) byCid.set(r.conditionId, r);
+        }
+        for (const m of watched) {
+          const r = rawToRow(m);
+          if (r !== null) byCid.set(r.conditionId, r);
+        }
+
+        const merged = Array.from(byCid.values());
+        if (merged.length > 0) setRows(merged);
+
+        const wSet = new Set<string>();
+        for (const m of watched) {
+          if (m.question !== null) wSet.add(m.conditionId);
+        }
+        setWatchedCids(wSet);
+
+        const aMap = new Map<string, AgentDecision>();
+        for (const d of state.market_decisions ?? []) {
+          aMap.set(d.cid, d);
+        }
+        setAgentDecisions(aMap);
       } catch {
         /* keep sample */
       }
@@ -181,7 +246,8 @@ export function MarketsTable(): JSX.Element {
 
   const filtered = useMemo(() => {
     const tabDef = TABS.find((t) => t.key === tab) ?? TABS[2];
-    let out = rows.filter((r) => tabDef.filter(r, favs));
+    const ctx: FilterCtx = { favs, watched: watchedCids };
+    let out = rows.filter((r) => tabDef.filter(r, ctx));
     if (search.trim().length > 0) {
       const q = search.toLowerCase();
       out = out.filter((r) => r.question.toLowerCase().includes(q));
@@ -204,9 +270,9 @@ export function MarketsTable(): JSX.Element {
       }
     });
     return out;
-  }, [rows, tab, search, sort, favs]);
+  }, [rows, tab, search, sort, favs, watchedCids]);
 
-  const liveCount = rows.length;
+  const liveCount = watchedCids.size;
 
   return (
     <section className="mt-12">
@@ -298,6 +364,7 @@ export function MarketsTable(): JSX.Element {
           rows={filtered}
           favs={favs}
           onToggleFav={toggleFav}
+          decisions={agentDecisions}
           sort={sort}
           onSort={(key) =>
             setSort((prev) =>
@@ -308,7 +375,12 @@ export function MarketsTable(): JSX.Element {
           }
         />
       ) : (
-        <GridView rows={filtered} favs={favs} onToggleFav={toggleFav} />
+        <GridView
+          rows={filtered}
+          favs={favs}
+          onToggleFav={toggleFav}
+          decisions={agentDecisions}
+        />
       )}
     </section>
   );
@@ -320,12 +392,14 @@ function ListView({
   rows,
   favs,
   onToggleFav,
+  decisions,
   sort,
   onSort,
 }: {
   readonly rows: readonly MarketRow[];
   readonly favs: ReadonlySet<string>;
   readonly onToggleFav: (id: string) => void;
+  readonly decisions: ReadonlyMap<string, AgentDecision>;
   readonly sort: { key: SortKey; dir: "asc" | "desc" };
   readonly onSort: (k: SortKey) => void;
 }): JSX.Element {
@@ -366,6 +440,7 @@ function ListView({
           {rows.map((m) => {
             const isUp = m.delta24h > 0;
             const isFav = favs.has(m.conditionId);
+            const dec = decisions.get(m.conditionId);
             return (
               <tr
                 key={m.conditionId}
@@ -396,9 +471,7 @@ function ListView({
                         <span>
                           0x{m.conditionId.slice(0, 6)}…{m.conditionId.slice(-4)}
                         </span>
-                        <span className="rounded border border-ink-700 px-1 py-px">
-                          {m.leverage}
-                        </span>
+                        <AgentBadge decision={dec} />
                       </div>
                     </div>
                   </div>
@@ -462,16 +535,19 @@ function GridView({
   rows,
   favs,
   onToggleFav,
+  decisions,
 }: {
   readonly rows: readonly MarketRow[];
   readonly favs: ReadonlySet<string>;
   readonly onToggleFav: (id: string) => void;
+  readonly decisions: ReadonlyMap<string, AgentDecision>;
 }): JSX.Element {
   return (
     <div className="grid gap-4 pt-4 md:grid-cols-2 xl:grid-cols-3">
       {rows.map((m) => {
         const isUp = m.delta24h > 0;
         const isFav = favs.has(m.conditionId);
+        const dec = decisions.get(m.conditionId);
         return (
           <Link
             key={m.conditionId}
@@ -481,9 +557,14 @@ function GridView({
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 <MarketAvatar question={m.question} size={36} />
-                <p className="line-clamp-2 text-sm font-medium text-chalk-50">
-                  {m.question}
-                </p>
+                <div className="min-w-0">
+                  <p className="line-clamp-2 text-sm font-medium text-chalk-50">
+                    {m.question}
+                  </p>
+                  <div className="mt-1.5">
+                    <AgentBadge decision={dec} />
+                  </div>
+                </div>
               </div>
               <button
                 type="button"
@@ -535,6 +616,35 @@ function GridView({
 }
 
 // ---------- Helpers / icons ----------------------------------------------
+
+function fmtAge(ms: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86_400) return `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86_400)}d`;
+}
+
+function AgentBadge({
+  decision,
+}: {
+  readonly decision: AgentDecision | undefined;
+}): JSX.Element {
+  if (decision === undefined) {
+    return (
+      <span className="rounded border border-ink-700 px-1 py-px text-chalk-600">
+        unreviewed
+      </span>
+    );
+  }
+  const ltvPct = (decision.ltv_max_bps / 100).toFixed(0);
+  const reviewedAge = fmtAge(decision.reviewed_at_unix_ms);
+  return (
+    <span className="rounded border border-violet-500/40 bg-violet-500/10 px-1 py-px text-violet-300">
+      VANTA · {ltvPct}% · {reviewedAge} ago
+    </span>
+  );
+}
 
 function formatK(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "—";
