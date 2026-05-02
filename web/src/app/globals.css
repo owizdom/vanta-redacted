@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: #08090b;
+  color: #f6f7f9;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Square-grid background — large 96px cells, subtle gray lines.
+   Anchored to the body so it covers the hero without each section
+   re-drawing its own grid (sections that want a clean bg use bg-ink-950). */
+.grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 96px 96px;
+  background-position: -1px -1px;
+}
+
+/* Background gradient bloom anchored bottom-center for the hero */
+body::after {
+  content: "";
+  position: fixed;
+  bottom: -30%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80vw;
+  height: 60vw;
+  pointer-events: none;
+  z-index: -1;
+  background: radial-gradient(closest-side, rgba(108, 84, 255, 0.18), transparent 70%);
+}
+
+::selection {
+  background: rgba(67, 224, 140, 0.32);
+  color: #f6f7f9;
+}
