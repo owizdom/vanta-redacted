@@ -110,6 +110,44 @@ const LOAN_BOOK_WIRING_ABI = [
   },
 ] as const;
 
+// LoanBook origination-fee admin surface. The fee path is off by default
+// at deploy time (feeBps = 0, feeReceiver = address(0)) so the contract
+// can be deployed before the runtime exposes its treasury address. The
+// runtime configures both on first boot via the steps below.
+const LOAN_BOOK_FEE_ABI = [
+  {
+    type: "function",
+    name: "feeBps",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint16" }],
+  },
+  {
+    type: "function",
+    name: "feeReceiver",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "address" }],
+  },
+  {
+    type: "function",
+    name: "setOriginationFeeBps",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "newBps", type: "uint16" }],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "setFeeReceiver",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "newReceiver", type: "address" }],
+    outputs: [],
+  },
+] as const;
+
+/** Default origination-fee target. 50 bps = 0.5%. Capped on-chain at 500. */
+const DEFAULT_ORIGINATION_FEE_BPS = 50;
+
 export interface Bootstrap {
   readonly tee: TeeState;
   readonly log: FileEventLog;
@@ -384,6 +422,94 @@ async function bootWireVaultIfNeeded(args: {
 }
 
 /**
+ * Configure LoanBook origination-fee parameters on first boot.
+ *
+ * Idempotent: reads current feeBps + feeReceiver, only broadcasts the
+ * setters if a value differs from the configured target. This lets us
+ * deploy LoanBook with fees off (because the deployer doesn't know the
+ * treasury address — only the running enclave does), then have the
+ * runtime configure them once it knows its own treasury.
+ *
+ * The receiver is always the HKDF-derived `vanta-agent-treasury-v1` EOA;
+ * feeBps defaults to DEFAULT_ORIGINATION_FEE_BPS but can be overridden
+ * via env (handy for governance recalibration without redeploy).
+ */
+async function bootConfigureLoanBookFees(args: {
+  readonly publicClient: PublicClient;
+  readonly walletClient: WalletClient;
+  readonly loanBookAddress: Address;
+  readonly treasuryAddress: Address;
+  readonly desiredFeeBps: number;
+}): Promise<void> {
+  const account = args.walletClient.account;
+  if (account === undefined) {
+    throw new TeeError(
+      "env_not_configured",
+      "BOOT_FEE_CONFIG: walletClient has no bound account; cannot sign txs",
+    );
+  }
+  const chain = args.walletClient.chain ?? null;
+
+  const currentBps = (await args.publicClient.readContract({
+    address: args.loanBookAddress,
+    abi: LOAN_BOOK_FEE_ABI,
+    functionName: "feeBps",
+  })) as number;
+  const currentReceiver = (await args.publicClient.readContract({
+    address: args.loanBookAddress,
+    abi: LOAN_BOOK_FEE_ABI,
+    functionName: "feeReceiver",
+  })) as Address;
+
+  const wantBps = args.desiredFeeBps;
+  const wantReceiver = args.treasuryAddress;
+
+  // Receiver must be set before bps becomes non-zero — otherwise the
+  // setOriginationFeeBps tx succeeds but originate() would still take
+  // the no-fee path (bps != 0 && receiver == 0 short-circuits to no-fee
+  // in LoanBook.sol). Set receiver first.
+  if (currentReceiver.toLowerCase() !== wantReceiver.toLowerCase()) {
+    process.stderr.write(
+      `[bootstrap] BOOT_FEE_CONFIG: setFeeReceiver(${wantReceiver}) (was ${currentReceiver})\n`,
+    );
+    const hash = await args.walletClient.writeContract({
+      address: args.loanBookAddress,
+      abi: LOAN_BOOK_FEE_ABI,
+      functionName: "setFeeReceiver",
+      args: [wantReceiver],
+      account,
+      chain,
+    });
+    await args.publicClient.waitForTransactionReceipt({ hash });
+    process.stderr.write(`[bootstrap] BOOT_FEE_CONFIG: receiver tx ${hash}\n`);
+  } else {
+    process.stderr.write(
+      `[bootstrap] BOOT_FEE_CONFIG: feeReceiver already == ${wantReceiver}; no-op\n`,
+    );
+  }
+
+  if (Number(currentBps) !== wantBps) {
+    process.stderr.write(
+      `[bootstrap] BOOT_FEE_CONFIG: setOriginationFeeBps(${String(wantBps)}) (was ${String(currentBps)})\n`,
+    );
+    const hash = await args.walletClient.writeContract({
+      address: args.loanBookAddress,
+      abi: LOAN_BOOK_FEE_ABI,
+      functionName: "setOriginationFeeBps",
+      args: [wantBps],
+      account,
+      chain,
+    });
+    await args.publicClient.waitForTransactionReceipt({ hash });
+    process.stderr.write(`[bootstrap] BOOT_FEE_CONFIG: bps tx ${hash}\n`);
+  } else {
+    process.stderr.write(
+      `[bootstrap] BOOT_FEE_CONFIG: feeBps already == ${String(wantBps)}; no-op\n`,
+    );
+  }
+}
+
+/**
  * I-RT-2: assert the LoanBook on-chain admin matches the derived EOA.
  */
 async function assertOnchainOwnerMatches(
@@ -591,6 +717,21 @@ export async function bootstrap(config: RuntimeConfig): Promise<Bootstrap> {
       lpVaultAddress: config.lpVaultAddress,
       loanBookAddress: config.loanBookAddress,
     });
+    // Same boot phase: configure the LoanBook origination-fee parameters
+    // to point at our HKDF-derived treasury. Idempotent — bails as no-op
+    // when current state already matches the target. Skipped on chains
+    // where the LoanBook address is the zero placeholder (bootstrap mode).
+    if (
+      config.loanBookAddress !== "0x0000000000000000000000000000000000000000"
+    ) {
+      await bootConfigureLoanBookFees({
+        publicClient,
+        walletClient,
+        loanBookAddress: config.loanBookAddress,
+        treasuryAddress: treasury.address as Address,
+        desiredFeeBps: DEFAULT_ORIGINATION_FEE_BPS,
+      });
+    }
   }
 
   // Step 7: hydrate the in-memory loan registry from the on-disk log.

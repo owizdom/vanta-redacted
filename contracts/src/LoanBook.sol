@@ -59,6 +59,9 @@ contract LoanBook is Ownable2Step {
     error PrincipalIsZero();
     error AlreadyWired();
     error VaultMismatch(address expected, address actual);
+    error FeeBpsAboveCap(uint16 bps, uint16 cap);
+    error FeeReceiverZero();
+    error FeeExceedsPrincipal(uint256 fee, uint256 principal);
 
     event Originated(
         bytes32 indexed loanId,
@@ -69,6 +72,17 @@ contract LoanBook is Ownable2Step {
         bytes32 attestationHash,
         bytes32 paramsHash
     );
+    /// @notice Origination fee charged on a loan. Emitted whenever the
+    ///         borrower receives `principal - fee` and `feeReceiver`
+    ///         receives `fee`. `fee == 0` originations skip this event.
+    event OriginationFeeCharged(
+        bytes32 indexed loanId,
+        address indexed feeReceiver,
+        uint256 fee,
+        uint16 feeBps
+    );
+    event OriginationFeeBpsUpdated(uint16 oldBps, uint16 newBps);
+    event FeeReceiverUpdated(address indexed oldReceiver, address indexed newReceiver);
     /// @notice Borrower repaid in full. `principal` is the recovered amount
     ///         (always equals `loan.principal`; emitted for log-side
     ///         convenience so consumers don't have to re-read the loan).
@@ -77,6 +91,25 @@ contract LoanBook is Ownable2Step {
     ///         actually delivered (may be < principal — the LpVault then
     ///         realises the loss the next time `totalAssets()` is read).
     event Liquidated(bytes32 indexed loanId, address indexed auctionEscrow, uint256 proceeds);
+
+    /// @notice Maximum permitted origination fee (5%). Owner can set
+    ///         feeBps anywhere in [0, FEE_BPS_CAP]; values above revert.
+    uint16 public constant FEE_BPS_CAP = 500;
+
+    /// @notice Origination fee in basis points (1bps = 0.01%). Charged
+    ///         on `originate()`: borrower receives `principal - fee`,
+    ///         feeReceiver receives `fee`. The loan record's `principal`
+    ///         is unchanged — the borrower repays full principal at
+    ///         maturity (standard origination-fee accounting). Owner-
+    ///         settable; capped at FEE_BPS_CAP.
+    uint16 public feeBps;
+
+    /// @notice Recipient of origination fees. The HKDF-derived
+    ///         `vanta-agent-treasury-v1` EOA in production. Owner-set
+    ///         post-deploy via `setFeeReceiver` so the LoanBook can be
+    ///         deployed before the runtime exposes its treasury address
+    ///         (the IKM seed lives only inside the enclave).
+    address public feeReceiver;
 
     /// @param usdc_ Vault asset; must equal `lpVault_.asset()`.
     /// @param lpVault_ Pre-deployed LpVault; LoanBook gets wired in via the
@@ -89,6 +122,32 @@ contract LoanBook is Ownable2Step {
         }
         usdc = usdc_;
         lpVault = lpVault_;
+        // feeBps and feeReceiver default to 0 / address(0); owner enables
+        // the fee path post-deploy via setOriginationFeeBps + setFeeReceiver.
+    }
+
+    // -----------------------------------------------------------------------
+    // Fee admin (owner-only)
+    // -----------------------------------------------------------------------
+
+    /// @notice Update origination fee. Capped at FEE_BPS_CAP (5%). Setting
+    ///         to 0 disables the fee path; existing loans are unaffected
+    ///         since `principal` is fixed at origination.
+    function setOriginationFeeBps(uint16 newBps) external onlyOwner {
+        if (newBps > FEE_BPS_CAP) revert FeeBpsAboveCap(newBps, FEE_BPS_CAP);
+        uint16 old = feeBps;
+        feeBps = newBps;
+        emit OriginationFeeBpsUpdated(old, newBps);
+    }
+
+    /// @notice Update fee receiver. Reverts on zero address (unset
+    ///         receiver while feeBps > 0 would burn the fee). Set
+    ///         feeBps = 0 first if you want to disable the path entirely.
+    function setFeeReceiver(address newReceiver) external onlyOwner {
+        if (newReceiver == address(0)) revert FeeReceiverZero();
+        address old = feeReceiver;
+        feeReceiver = newReceiver;
+        emit FeeReceiverUpdated(old, newReceiver);
     }
 
     // -----------------------------------------------------------------------
@@ -149,9 +208,27 @@ contract LoanBook is Ownable2Step {
         });
         outstandingPrincipal += principal;
 
-        // Pull the principal from the vault and forward to the borrower.
-        // LpVault.drawFor does the safeTransfer + auth check.
-        lpVault.drawFor(borrower, principal);
+        // Origination-fee split: the borrower receives `principal - fee`,
+        // the fee goes to feeReceiver. Loan record `principal` is the
+        // amount the borrower owes at maturity (standard origination-fee
+        // accounting — borrower bears the cost). When feeBps is 0 or
+        // feeReceiver is unset, behavior is identical to the no-fee path:
+        // a single drawFor of the full principal to the borrower.
+        uint16 _bps = feeBps;
+        address _receiver = feeReceiver;
+        uint256 fee = 0;
+        if (_bps != 0 && _receiver != address(0)) {
+            fee = (principal * _bps) / 10_000;
+            if (fee >= principal) revert FeeExceedsPrincipal(fee, principal);
+        }
+
+        if (fee == 0) {
+            lpVault.drawFor(borrower, principal);
+        } else {
+            lpVault.drawFor(borrower, principal - fee);
+            lpVault.drawFor(_receiver, fee);
+            emit OriginationFeeCharged(loanId, _receiver, fee, _bps);
+        }
 
         emit Originated(
             loanId, borrower, principal, haircutBps, maturityTs, attestationHash, paramsHash
