@@ -123,11 +123,18 @@ export function createOperationalReader(
       0n,
     );
 
-    // Native balances aren't surfaced in the snapshot directly — the
-    // operational loop only consumes treasury USDC + gas — but reading
-    // them counts toward RPC health for the anomaly detector.
-    await tryRead(() => baseClient.getBalance({ address: args.treasuryAddress }), 0n);
-    await tryRead(() => baseClient.getBalance({ address: args.adminAddress }), 0n);
+    // Native balances on Base Sepolia (admin + treasury) drive the
+    // gas-refill subroutine in payouts.ts. Amoy admin balance is read
+    // for RPC-health accounting but not surfaced — the runtime never
+    // signs Amoy txs today (paper §7 — VantaVault is read-only).
+    const treasuryNative = await tryRead(
+      () => baseClient.getBalance({ address: args.treasuryAddress }),
+      0n,
+    );
+    const adminNative = await tryRead(
+      () => baseClient.getBalance({ address: args.adminAddress }),
+      0n,
+    );
     await tryRead(() => amoyClient.getBalance({ address: args.adminAddress }), 0n);
 
     const baseGasWei = await tryRead(() => baseClient.getGasPrice(), 0n);
@@ -153,6 +160,8 @@ export function createOperationalReader(
       inference_cost_baseline_usdc: 0,
       oracle_read_failures: oracleFailures,
       rpc_healthy_pct: rpcHealthyPct,
+      admin_native_wei: adminNative.toString(),
+      treasury_native_wei: treasuryNative.toString(),
     };
     cached = out;
     return out;

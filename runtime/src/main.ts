@@ -18,6 +18,7 @@
 
 import { fetchMarket, fetchTrades } from "@vanta/mark";
 import { buildAndSign, type VantaEvent } from "@vanta/events";
+import { Payouts } from "./services/payouts.js";
 import {
   asSha256Hex,
   sign as teeSign,
@@ -185,6 +186,8 @@ async function stubOperationalSnapshot(): Promise<OperationalSnapshot> {
     inference_cost_baseline_usdc: 0.003,
     oracle_read_failures: 0,
     rpc_healthy_pct: 100,
+    admin_native_wei: (10n ** 17n).toString(), // 0.1 ETH
+    treasury_native_wei: (10n ** 16n).toString(), // 0.01 ETH
   };
 }
 
@@ -336,9 +339,31 @@ async function startMain(): Promise<void> {
     baseRpcUrl: config.loanBookRpcUrl,
     amoyRpcUrl: config.amoyRpcUrl,
   });
+  // Payouts orchestrator — gas refill (T1) + hosting/inference (T2) on
+  // the operational tick. Each bucket gates on its own *_ENABLED flag;
+  // default off so a misconfigured deploy is safe.
+  const payouts = new Payouts({
+    bootstrap: boot,
+    config: config.payouts,
+    usdcAddress: USDC_BASE_SEPOLIA,
+  });
   const operationalLoop = createOperationalLoop({
     ctx,
-    observe: () => operationalReader.snapshot(),
+    observe: async () => {
+      const snap = await operationalReader.snapshot();
+      // Best-effort — per-bucket failures emit a trace and never block
+      // the snapshot return (the loop's own anomaly detection still
+      // fires on stale snapshots).
+      try {
+        await payouts.runTick();
+      } catch (err) {
+        app.log.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          "payouts_tick_failed",
+        );
+      }
+      return snap;
+    },
     tickSeconds: 60 * 60,
   });
 

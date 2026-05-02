@@ -56,6 +56,10 @@ export interface OperationalSnapshot {
   readonly oracle_read_failures: number;
   /** RPC health: percentage of healthy RPC requests this tick. */
   readonly rpc_healthy_pct: number;
+  /** Admin EOA native ETH balance (Base Sepolia), wei. uint256 string. */
+  readonly admin_native_wei: string;
+  /** Treasury EOA native ETH balance (Base Sepolia), wei. uint256 string. */
+  readonly treasury_native_wei: string;
 }
 
 export type FetchOperationalSnapshotFn = () => Promise<OperationalSnapshot>;

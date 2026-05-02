@@ -21,6 +21,7 @@ import type { FileEventLog } from "../../events-store.js";
 import type { OperationalReader } from "../../services/operational-snapshot.js";
 
 import { WATCHED_MARKETS } from "../../services/watched-markets.js";
+import { walkPayouts, sumByBucket } from "../../services/payouts-history.js";
 
 export interface RegisterStateRouteOpts {
   readonly marketsCache: MarketsCache;
@@ -79,13 +80,13 @@ export async function registerStateRoute(
       if (recent.length >= 500) break;
     }
 
-    // P&L last-24h: sum treasury.inflow amount minus operational outflow
-    // proxies. We don't track every gas-spend on chain, so this is a
-    // best-effort agent-revenue figure (x402 metering settlements, loan
-    // settlement spreads) until the operational loop emits explicit
-    // outflow events.
+    // P&L last-24h: sum treasury.inflow amount and treasury.outflow
+    // amount. Both are real on-chain figures now — inflow from
+    // origination fees + x402 metering, outflow from gas refills +
+    // VendorPayment.pay calls (the agent paying its own bills).
     const dayAgoUnix = Math.floor(now / 1000) - 24 * 60 * 60;
     let earned_today_usdc6 = 0n;
+    let spent_today_usdc6 = 0n;
     for (const ev of recent) {
       if (ev.timestamp < dayAgoUnix) break;
       if (ev.type === "treasury.inflow") {
@@ -93,8 +94,23 @@ export async function registerStateRoute(
         if (typeof amt === "string") {
           try { earned_today_usdc6 += BigInt(amt); } catch { /* skip */ }
         }
+      } else if (ev.type === "treasury.outflow") {
+        const amt = ev.body["amount"];
+        if (typeof amt === "string") {
+          try { spent_today_usdc6 += BigInt(amt); } catch { /* skip */ }
+        }
       }
     }
+
+    // Payouts last 7 days, joined to sibling reasoning.trace by bucket.
+    // Re-walks the log under the hood — fine here because /api/state
+    // already walks 500 events; this adds one more pass over the same
+    // window (much cheaper than tip→genesis).
+    const sevenDayPayouts = await walkPayouts(
+      opts.log,
+      Math.floor(now / 1000) - 7 * 24 * 60 * 60,
+    );
+    const payoutsWeeklyTotals = sumByBucket(sevenDayPayouts);
 
     // Latest signed decision — first event we hit walking tip→genesis
     // that's a loop event the user would call a "decision".
@@ -216,6 +232,33 @@ export async function registerStateRoute(
         onboarding: snapLoop(opts.loops.onboarding),
       },
       market_decisions: Array.from(market_decisions.values()),
+      // Payouts surface — last 24h spend, weekly totals by bucket, and
+      // most recent disbursements (history) so the UI can render the
+      // "agent pays itself" line. admin/treasury native balances come
+      // from the cached operational snapshot.
+      spent_today_usdc: (Number(spent_today_usdc6) / 1_000_000).toFixed(2),
+      payouts_weekly_totals_usdc6: {
+        gas_topup: payoutsWeeklyTotals.gas_topup.toString(),
+        hosting: payoutsWeeklyTotals.hosting.toString(),
+        inference: payoutsWeeklyTotals.inference.toString(),
+      },
+      payouts_history: sevenDayPayouts.slice(0, 30).map((r) => ({
+        ts_unix_ms: r.ts * 1000,
+        bucket: r.bucket,
+        amount_usdc6: r.amountUsdc6,
+        recipient: r.recipient,
+        asset: r.asset,
+        tx_hash: r.txHash,
+        dry_run: r.dryRun,
+      })),
+      admin_native_wei: ((): string | null => {
+        const snap = opts.operationalReader.latest();
+        return snap === null ? null : snap.admin_native_wei;
+      })(),
+      treasury_native_wei: ((): string | null => {
+        const snap = opts.operationalReader.latest();
+        return snap === null ? null : snap.treasury_native_wei;
+      })(),
     };
   });
 

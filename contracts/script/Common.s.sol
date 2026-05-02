@@ -130,7 +130,13 @@ abstract contract Common is Script {
         vm.serializeUint(obj, "chainId", chainId);
 
         // Preserve every prior address key by re-emitting it.
-        string[3] memory knownKeys = ["LpVault", "LoanBook", "VantaVault"];
+        string[5] memory knownKeys = [
+            "LpVault",
+            "LoanBook",
+            "VantaVault",
+            "VendorPaymentHosting",
+            "VendorPaymentInference"
+        ];
         for (uint256 i = 0; i < knownKeys.length; i++) {
             if (keccak256(bytes(knownKeys[i])) == keccak256(bytes(key))) continue;
             if (bytes(existing).length == 0) continue;

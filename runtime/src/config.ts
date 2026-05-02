@@ -89,6 +89,49 @@ const RawConfig = z.object({
   /** Internal-bypass header secret. Internal callers (Mineflayer bridge, the
    *  wizard's own loop) set X-Vanta-Internal=<this> to skip metering. Empty = no bypass. */
   VANTA_INTERNAL_SECRET: z.string().default(""),
+
+  // ----- Payouts (paper §7 + §8 — agent self-funds its own bills) -----
+  // Three independently-gated buckets; each ships off by default and is
+  // flipped on after one verified live disbursement per bucket.
+  //
+  // Tier 1 (T1) Direct: gas (USDC → ETH via Uniswap V3 multicall) +
+  // x402-metered inference (per-call EIP-3009 settlement, lit when the
+  // gateway URL points at an x402-aware LLM endpoint).
+  // Tier 2 (T2) Contract-mediated: hosting + inference fallback via
+  // VendorPayment(Ownable2Step) — caps live on-chain, immutable.
+  VANTA_OPERATOR_ADDRESS: z
+    .string()
+    .regex(ETH_ADDR, "must be a 0x-prefixed 20-byte hex address")
+    .optional(),
+  PAYOUTS_DRY_RUN: z.coerce.boolean().default(false),
+
+  // Gas (T1)
+  PAYOUTS_GAS_ENABLED: z.coerce.boolean().default(false),
+  PAYOUTS_GAS_LOW_WEI: z.coerce.bigint().default(5_000_000_000_000_000n),  // 0.005 ETH
+  PAYOUTS_GAS_HIGH_WEI: z.coerce.bigint().default(15_000_000_000_000_000n), // 0.015 ETH
+  PAYOUTS_GAS_TICK_CAP_USDC6: z.coerce.bigint().default(2_000_000n),       // 2 USDC
+  PAYOUTS_GAS_WEEKLY_CAP_USDC6: z.coerce.bigint().default(10_000_000n),    // 10 USDC
+  PAYOUTS_GAS_SLIPPAGE_BPS: z.coerce.number().int().min(0).max(10_000).default(100),
+  PAYOUTS_GAS_POOL_FEE: z.coerce.number().int().positive().default(500),
+
+  // Hosting (T2)
+  PAYOUTS_HOSTING_ENABLED: z.coerce.boolean().default(false),
+  PAYOUTS_HOSTING_CONTRACT_ADDRESS: z
+    .string()
+    .regex(ETH_ADDR, "must be a 0x-prefixed 20-byte hex address")
+    .optional(),
+  PAYOUTS_HOSTING_WEEKLY_USDC6: z.coerce.bigint().default(55_270_000n),    // $55.27
+  PAYOUTS_HOSTING_CONSTITUTIONAL_REF: z.string().default(""),
+
+  // Inference (T2 fallback; T1 active when AI_GATEWAY_BASE_URL is x402-metered)
+  PAYOUTS_INFERENCE_ENABLED: z.coerce.boolean().default(false),
+  PAYOUTS_INFERENCE_CONTRACT_ADDRESS: z
+    .string()
+    .regex(ETH_ADDR, "must be a 0x-prefixed 20-byte hex address")
+    .optional(),
+  PAYOUTS_INFERENCE_WEEKLY_USDC6: z.coerce.bigint().default(10_000_000n),  // $10
+  PAYOUTS_INFERENCE_CONSTITUTIONAL_REF: z.string().default(""),
+  PAYOUTS_INFERENCE_X402_URL: z.string().default(""),
 });
 
 export interface InferenceModelSlugs {
@@ -115,6 +158,36 @@ export interface X402Config {
   readonly internalSecret: string;
 }
 
+export interface PayoutsGasConfig {
+  readonly enabled: boolean;
+  readonly dryRun: boolean;
+  readonly lowWatermarkWei: bigint;
+  readonly highWatermarkWei: bigint;
+  readonly tickCapUsdc6: bigint;
+  readonly weeklyCapUsdc6: bigint;
+  readonly slippageBps: number;
+  readonly poolFee: number;
+  readonly router: `0x${string}`;
+  readonly quoter: `0x${string}`;
+  readonly weth: `0x${string}`;
+}
+
+export interface PayoutsVendorConfig {
+  readonly enabled: boolean;
+  readonly dryRun: boolean;
+  readonly contractAddress: `0x${string}` | null;
+  readonly weeklyCapUsdc6: bigint;
+  readonly constitutionalRef: string;
+}
+
+export interface PayoutsConfig {
+  readonly operatorAddress: `0x${string}` | null;
+  readonly gas: PayoutsGasConfig;
+  readonly hosting: PayoutsVendorConfig;
+  readonly inference: PayoutsVendorConfig;
+  readonly inferenceX402Url: string;
+}
+
 export interface RuntimeConfig {
   readonly port: number;
   readonly host: string;
@@ -130,6 +203,7 @@ export interface RuntimeConfig {
   readonly bootAndWire: boolean;
   readonly inference: InferenceConfig;
   readonly x402: X402Config;
+  readonly payouts: PayoutsConfig;
 }
 
 interface DeploymentsBaseSepolia {
@@ -244,5 +318,101 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
           : (raw.X402_RECEIVER_OVERRIDE as `0x${string}`),
       internalSecret: raw.VANTA_INTERNAL_SECRET,
     },
+    payouts: buildPayoutsConfig(raw),
+  };
+}
+
+/** Verified Base Sepolia (chainId 84532) Uniswap V3 deployment addresses. */
+const UNISWAP_V3_BASE_SEPOLIA = {
+  swapRouter02: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4" as const,
+  quoterV2: "0xC5290058841028F1614F3A6F0F5816cAd0df5E27" as const,
+  weth9: "0x4200000000000000000000000000000000000006" as const,
+} as const;
+
+function buildPayoutsConfig(raw: z.infer<typeof RawConfig>): PayoutsConfig {
+  const operatorAddress =
+    raw.VANTA_OPERATOR_ADDRESS === undefined
+      ? null
+      : (raw.VANTA_OPERATOR_ADDRESS as `0x${string}`);
+  const dryRun = raw.PAYOUTS_DRY_RUN;
+
+  const gas: PayoutsGasConfig = {
+    enabled: raw.PAYOUTS_GAS_ENABLED,
+    dryRun,
+    lowWatermarkWei: raw.PAYOUTS_GAS_LOW_WEI,
+    highWatermarkWei: raw.PAYOUTS_GAS_HIGH_WEI,
+    tickCapUsdc6: raw.PAYOUTS_GAS_TICK_CAP_USDC6,
+    weeklyCapUsdc6: raw.PAYOUTS_GAS_WEEKLY_CAP_USDC6,
+    slippageBps: raw.PAYOUTS_GAS_SLIPPAGE_BPS,
+    poolFee: raw.PAYOUTS_GAS_POOL_FEE,
+    router: UNISWAP_V3_BASE_SEPOLIA.swapRouter02,
+    quoter: UNISWAP_V3_BASE_SEPOLIA.quoterV2,
+    weth: UNISWAP_V3_BASE_SEPOLIA.weth9,
+  };
+
+  const hosting: PayoutsVendorConfig = {
+    enabled: raw.PAYOUTS_HOSTING_ENABLED,
+    dryRun,
+    contractAddress:
+      raw.PAYOUTS_HOSTING_CONTRACT_ADDRESS === undefined
+        ? null
+        : (raw.PAYOUTS_HOSTING_CONTRACT_ADDRESS as `0x${string}`),
+    weeklyCapUsdc6: raw.PAYOUTS_HOSTING_WEEKLY_USDC6,
+    constitutionalRef: raw.PAYOUTS_HOSTING_CONSTITUTIONAL_REF,
+  };
+
+  const inference: PayoutsVendorConfig = {
+    enabled: raw.PAYOUTS_INFERENCE_ENABLED,
+    dryRun,
+    contractAddress:
+      raw.PAYOUTS_INFERENCE_CONTRACT_ADDRESS === undefined
+        ? null
+        : (raw.PAYOUTS_INFERENCE_CONTRACT_ADDRESS as `0x${string}`),
+    weeklyCapUsdc6: raw.PAYOUTS_INFERENCE_WEEKLY_USDC6,
+    constitutionalRef: raw.PAYOUTS_INFERENCE_CONSTITUTIONAL_REF,
+  };
+
+  // Cross-bucket validation. Fail closed at boot — never half-configured.
+  if ((hosting.enabled || inference.enabled) && operatorAddress === null) {
+    throw new TeeError(
+      "env_not_configured",
+      "VANTA_OPERATOR_ADDRESS is required when PAYOUTS_HOSTING_ENABLED or PAYOUTS_INFERENCE_ENABLED is set",
+    );
+  }
+  if (hosting.enabled) {
+    if (hosting.contractAddress === null) {
+      throw new TeeError(
+        "env_not_configured",
+        "PAYOUTS_HOSTING_CONTRACT_ADDRESS is required when PAYOUTS_HOSTING_ENABLED=1",
+      );
+    }
+    if (hosting.constitutionalRef.length === 0) {
+      throw new TeeError(
+        "env_not_configured",
+        "PAYOUTS_HOSTING_CONSTITUTIONAL_REF is required when PAYOUTS_HOSTING_ENABLED=1",
+      );
+    }
+  }
+  if (inference.enabled) {
+    if (inference.contractAddress === null) {
+      throw new TeeError(
+        "env_not_configured",
+        "PAYOUTS_INFERENCE_CONTRACT_ADDRESS is required when PAYOUTS_INFERENCE_ENABLED=1",
+      );
+    }
+    if (inference.constitutionalRef.length === 0) {
+      throw new TeeError(
+        "env_not_configured",
+        "PAYOUTS_INFERENCE_CONSTITUTIONAL_REF is required when PAYOUTS_INFERENCE_ENABLED=1",
+      );
+    }
+  }
+
+  return {
+    operatorAddress,
+    gas,
+    hosting,
+    inference,
+    inferenceX402Url: raw.PAYOUTS_INFERENCE_X402_URL,
   };
 }

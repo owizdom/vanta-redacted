@@ -157,11 +157,15 @@ export interface Bootstrap {
   };
   /**
    * vanta-agent-treasury-v1 — HKDF-derived secp256k1 account on Base
-   * Sepolia. Receiver of X402 micropayments; spec-pinned distinct from
-   * `origination` so a metering breach can't mint loans.
+   * Sepolia. Receiver of X402 micropayments + origination fees;
+   * spec-pinned distinct from `origination` so a metering breach can't
+   * mint loans. The walletClient signs treasury-side outflows
+   * (Uniswap gas refills, VendorPayment.pay) — the only EOA that may
+   * push USDC out of the treasury on its own initiative.
    */
   readonly treasury: {
     readonly address: EthAddressHex;
+    readonly walletClient: WalletClient;
   };
   readonly publicClient: PublicClient;
   readonly walletClient: WalletClient;
@@ -704,6 +708,15 @@ export async function bootstrap(config: RuntimeConfig): Promise<Bootstrap> {
     chain: baseSepoliaLocal,
     transport,
   });
+  // Treasury walletClient — same chain + transport as origination, but
+  // bound to the HKDF-derived treasury account. Used by the Payouts
+  // service to sign Uniswap swaps + VendorPayment.pay calls.
+  const treasuryAccount = privateKeyToAccount(treasury.privateKey);
+  const treasuryWalletClient = createWalletClient({
+    account: treasuryAccount,
+    chain: baseSepoliaLocal,
+    transport,
+  });
 
   if (config.skipContractChecks) {
     // Bootstrap-deploy mode. Contracts may not exist yet — the whole
@@ -789,7 +802,10 @@ export async function bootstrap(config: RuntimeConfig): Promise<Bootstrap> {
     tee,
     log,
     origination,
-    treasury,
+    treasury: {
+      address: treasury.address,
+      walletClient: treasuryWalletClient,
+    },
     publicClient,
     walletClient,
     genesis,
@@ -801,13 +817,20 @@ export async function bootstrap(config: RuntimeConfig): Promise<Bootstrap> {
 }
 
 /**
- * HKDF → secp256k1 → viem-derived treasury address. Mirrors
- * `@vanta/treasury.deriveTreasuryAccount` but stays in-runtime so we
- * don't pay the cost of building duplicate viem clients we never use.
- * Only the address is needed at boot — outflow planning would
- * re-derive on demand if it lands in this runtime.
+ * HKDF → secp256k1 → viem-derived treasury address + private key.
+ * Mirrors `@vanta/treasury.deriveTreasuryAccount` but stays in-runtime
+ * so we don't pay the cost of building duplicate viem clients we never
+ * use.
+ *
+ * The private key is returned (not zeroed in this helper) so the
+ * caller can construct a walletClient against the chain config that's
+ * defined later in `bootstrap()`. The key lives in process memory for
+ * the runtime's lifetime — same posture as the origination key.
  */
-function deriveTreasuryBindings(): { address: EthAddressHex } {
+function deriveTreasuryBindings(): {
+  address: EthAddressHex;
+  privateKey: Hex;
+} {
   const buf: Buffer = deriveKey({
     salt: HKDF_SALT.AGENT_TREASURY,
     info: HKDF_INFO.AGENT_TREASURY,
@@ -819,6 +842,6 @@ function deriveTreasuryBindings(): { address: EthAddressHex } {
   const pkHex: `0x${string}` = `0x${buf.toString("hex")}`;
   const account = privateKeyToAccount(pkHex);
   buf.fill(0);
-  return { address: account.address };
+  return { address: account.address, privateKey: pkHex };
 }
 

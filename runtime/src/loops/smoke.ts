@@ -243,6 +243,8 @@ async function smokeOperational(): Promise<void> {
     inference_cost_baseline_usdc: 0.004,
     oracle_read_failures: 0,
     rpc_healthy_pct: 99,
+    admin_native_wei: (10n ** 17n).toString(),
+    treasury_native_wei: (10n ** 16n).toString(),
   };
 
   const loop = createOperationalLoop({
