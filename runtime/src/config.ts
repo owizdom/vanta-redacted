@@ -92,6 +92,28 @@ const RawConfig = z.object({
   // Force a static JWT for the gateway (bypasses AttestClient entirely).
   // Diagnostic-only; if set, the provider uses it verbatim.
   INFERENCE_STATIC_JWT: z.string().default(""),
+  // Backend selector. `eigen` = KMS-JWT path via @layr-labs/ai-gateway-provider
+  // (agent self-funds, billed to its own EigenCompute account). `vercel` =
+  // Vercel AI Gateway with operator-held bearer key (operator pays, agent
+  // is bounded by the on-chain VendorPayment(Inference) weekly cap). The
+  // Eigen gateway has been returning `crypto/rsa: verification error` 401s
+  // on every KMS-minted JWT for our sepolia-prod account — reproducible
+  // with the official `Layr-Labs/ecloud-inference-example` deployed
+  // unmodified — so `vercel` is the default until Eigen ships a fix.
+  // The runtime logs the active backend on startup and on every call so
+  // the trust story stays explicit about which auth path is live.
+  INFERENCE_BACKEND: z.enum(["eigen", "vercel"]).default("vercel"),
+  // Vercel AI Gateway endpoint. OpenAI-compatible chat-completions surface
+  // at `${baseURL}/v1/chat/completions`; same model slugs as the Eigen path
+  // (anthropic/claude-sonnet-4-6, openai/gpt-5, google/gemini-2.5-pro).
+  VERCEL_AI_GATEWAY_BASE_URL: z
+    .string()
+    .url()
+    .default("https://ai-gateway.vercel.sh"),
+  // Operator bearer key. Only required when INFERENCE_BACKEND=vercel; left
+  // empty otherwise so local-dev boots fine without one. The agent's spend
+  // is still bounded on chain via VendorPayment(Inference).
+  VERCEL_AI_GATEWAY_KEY: z.string().default(""),
   // ----- X402 metering (paper §8 / EigenCloud Service-Agent affordance) ---
   // When false (default for local Docker compose), the metered routes
   // pass through unmetered. Production / preview deployments flip this
@@ -161,12 +183,17 @@ export interface InferenceModelSlugs {
   readonly google: string;
 }
 
+export type InferenceBackend = "eigen" | "vercel";
+
 export interface InferenceConfig {
   readonly models: InferenceModelSlugs;
+  readonly backend: InferenceBackend;
   readonly eigenGatewayUrl: string;
   readonly audience: string;
   readonly debug: boolean;
   readonly staticJwt: string;
+  readonly vercelBaseUrl: string;
+  readonly vercelApiKey: string;
 }
 
 export interface X402Config {
@@ -324,10 +351,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
         openai: raw.INFERENCE_MODEL_OPENAI,
         google: raw.INFERENCE_MODEL_GOOGLE,
       },
+      backend: raw.INFERENCE_BACKEND,
       eigenGatewayUrl: raw.EIGEN_GATEWAY_URL,
       audience: raw.INFERENCE_AUDIENCE,
       debug: raw.INFERENCE_DEBUG,
       staticJwt: raw.INFERENCE_STATIC_JWT,
+      vercelBaseUrl: raw.VERCEL_AI_GATEWAY_BASE_URL,
+      vercelApiKey: raw.VERCEL_AI_GATEWAY_KEY,
     },
     x402: {
       enabled: raw.X402_ENABLED,

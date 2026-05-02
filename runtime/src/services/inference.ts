@@ -4,13 +4,27 @@
  * signed `op.inference` event in VANTA's event log — the request hash,
  * response hash, and inline excerpt are part of the immutable record.
  *
- * One backend: EigenCloud Eigen Gateway via @layr-labs/ai-gateway-provider
- * (OpenAI-compatible chat-completions surface). All providers — Anthropic,
- * OpenAI, Google — go through it so the audit trail is uniform and per-
- * call accounting lives in one place. Auth is per-call JWT minted via
- * TEE attestation against KMS_SERVER_URL + KMS_PUBLIC_KEY (auto-injected
- * inside EigenCompute); billed to the agent's own EigenCompute account.
- * No bearer tokens, no operator-held keys.
+ * Two backends, env-selected via `INFERENCE_BACKEND`:
+ *
+ *  - `eigen` — EigenCloud Eigen Gateway via `@layr-labs/ai-gateway-provider`.
+ *    Auth is per-call JWT minted via TEE attestation against
+ *    `KMS_SERVER_URL` + `KMS_PUBLIC_KEY` (auto-injected inside EigenCompute);
+ *    billed to the agent's own EigenCompute account. The agent self-funds
+ *    inference end-to-end. As of 2026-05-02 this path returns
+ *    `crypto/rsa: verification error` 401s on our sepolia-prod account —
+ *    reproducible with `Layr-Labs/ecloud-inference-example` deployed
+ *    unmodified — so the path is staged but inactive until Eigen ships a fix.
+ *
+ *  - `vercel` — Vercel AI Gateway, OpenAI-compatible. Auth is an operator-
+ *    held bearer key (`VERCEL_AI_GATEWAY_KEY`). The operator pays Vercel
+ *    in fiat downstream; the agent's inference spend is still bounded
+ *    on chain by `VendorPayment(Inference)` weekly cap (immutable post-deploy).
+ *    Default until the Eigen gateway is fixed.
+ *
+ * Both backends use the same OpenAI-style model slugs (anthropic/...,
+ * openai/..., google/...) so the canonical request and event shape is
+ * uniform regardless of which path is live. The active backend is logged
+ * on client construction and on every call so the trust story is explicit.
  *
  * The provider for `researcher` / `evaluator` / `adversary` rotates
  * deterministically per UTC day so the three roles never share the
@@ -196,6 +210,17 @@ export function createInferenceClient(
   const now = opts.nowMs ?? Date.now;
   const eigenProvider = buildEigenProvider(opts.config);
 
+  // Boot-time log of the active backend. Stays explicit about which auth
+  // path is live for this deploy; pairs with the per-call log below.
+  const bootBackend = chooseBackend(opts.config);
+  if (bootBackend === null) {
+    console.warn(
+      `[inference] backend=${opts.config.backend} unavailable at boot — required env not set; calls will fail with no_credentials`,
+    );
+  } else {
+    console.log(`[inference] backend=${bootBackend.kind} (active)`);
+  }
+
   return {
     async call(req: InferenceRequest): Promise<InferenceResponse> {
       validateRequest(req);
@@ -207,12 +232,19 @@ export function createInferenceClient(
 
       const backend = chooseBackend(opts.config);
       if (backend === null) {
-        throw new InferenceError(
-          "no_credentials",
-          "no inference backend available; KMS_SERVER_URL + KMS_PUBLIC_KEY (or INFERENCE_STATIC_JWT) required",
-          { provider, role: req.role },
-        );
+        const reason =
+          opts.config.backend === "vercel"
+            ? "VERCEL_AI_GATEWAY_KEY required when INFERENCE_BACKEND=vercel"
+            : "KMS_SERVER_URL + KMS_PUBLIC_KEY (or INFERENCE_STATIC_JWT) required when INFERENCE_BACKEND=eigen";
+        throw new InferenceError("no_credentials", reason, {
+          provider,
+          role: req.role,
+          backend: opts.config.backend,
+        });
       }
+      console.log(
+        `[inference] backend=${backend.kind} provider=${provider} model=${model} role=${req.role}`,
+      );
 
       const canonicalRequestBody = buildCanonicalRequestBody({
         provider,
@@ -242,6 +274,8 @@ export function createInferenceClient(
           temperature: req.temperature ?? 0,
           fetchImpl,
           eigenProvider,
+          vercelBaseUrl: opts.config.vercelBaseUrl,
+          vercelApiKey: opts.config.vercelApiKey,
         });
       } catch (err: unknown) {
         if (err instanceof InferenceError) throw err;
@@ -343,16 +377,23 @@ function pickModelSlug(
 // ---------------------------------------------------------------------------
 
 /**
- * Backend choice — `null` when KMS attestation env vars aren't set
- * (local dev outside EigenCompute). Inside EigenCompute, `KMS_SERVER_URL`
- * and `KMS_PUBLIC_KEY` are auto-injected by the launcher and the
- * `eigen` provider auto-fetches a JWT against them per call.
+ * Backend choice — `null` when the configured backend isn't usable
+ * (no KMS env for `eigen`, no API key for `vercel`). Inside EigenCompute,
+ * `KMS_SERVER_URL` + `KMS_PUBLIC_KEY` are auto-injected; outside, the
+ * Vercel path needs `VERCEL_AI_GATEWAY_KEY` set.
  */
-interface BackendChoice {
-  readonly kind: "eigen";
-}
+type BackendChoice =
+  | { readonly kind: "eigen" }
+  | { readonly kind: "vercel" };
 
 function chooseBackend(cfg: InferenceConfig): BackendChoice | null {
+  if (cfg.backend === "vercel") {
+    if (cfg.vercelApiKey.length === 0 || cfg.vercelBaseUrl.length === 0) {
+      return null;
+    }
+    return { kind: "vercel" };
+  }
+  // backend === "eigen"
   const kmsServerURL = process.env["KMS_SERVER_URL"];
   const kmsPublicKey = process.env["KMS_PUBLIC_KEY"];
   const envJwtOverride = process.env["KMS_AUTH_JWT"];
@@ -423,12 +464,14 @@ interface InvokeArgs {
   readonly messages: readonly InferenceMessage[];
   readonly maxTokens: number;
   readonly temperature: number;
-  /** Retained for symmetry; the eigen provider has its own internal fetch. */
   readonly fetchImpl: typeof fetch;
   readonly eigenProvider: EigenProviderFn;
+  readonly vercelBaseUrl: string;
+  readonly vercelApiKey: string;
 }
 
 async function invokeBackend(args: InvokeArgs): Promise<ProviderCallResult> {
+  if (args.backend.kind === "vercel") return invokeVercelGateway(args);
   return invokeEigenGateway(args);
 }
 
@@ -469,6 +512,99 @@ async function invokeEigenGateway(args: InvokeArgs): Promise<ProviderCallResult>
       { provider: args.provider, model: args.model },
     );
   }
+}
+
+/**
+ * Hit the Vercel AI Gateway via raw fetch (OpenAI-compatible chat-
+ * completions). Bearer auth uses an operator-held API key
+ * (`VERCEL_AI_GATEWAY_KEY`) — the operator pays Vercel in fiat downstream.
+ * The agent's inference spend is bounded on chain by
+ * `VendorPayment(Inference)` weekly cap (immutable post-deploy), so a
+ * compromised key still cannot drain more than the cap allows.
+ *
+ * In use as the default backend until EigenCloud ships a fix for the
+ * gateway-side `crypto/rsa: verification error` 401 (reproducible with
+ * the official inference example deployed unmodified, 2026-05-02).
+ */
+async function invokeVercelGateway(args: InvokeArgs): Promise<ProviderCallResult> {
+  const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [];
+  if (args.system.length > 0) {
+    messages.push({ role: "system", content: args.system });
+  }
+  for (const m of args.messages) {
+    messages.push({ role: m.role, content: m.content });
+  }
+
+  const url = joinUrl(args.vercelBaseUrl, "/v1/chat/completions");
+  const body = {
+    model: args.model,
+    messages,
+    max_tokens: args.maxTokens,
+    temperature: args.temperature,
+  };
+
+  let res: Response;
+  try {
+    res = await args.fetchImpl(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${args.vercelApiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err: unknown) {
+    throw new InferenceError(
+      "http_error",
+      err instanceof Error ? err.message : String(err),
+      { provider: args.provider, model: args.model, backend: "vercel" },
+    );
+  }
+
+  if (!res.ok) {
+    const text = await safeReadText(res);
+    throw new InferenceError(
+      "http_error",
+      `Vercel AI Gateway ${res.status}: ${text.slice(0, 256)}`,
+      { provider: args.provider, model: args.model, backend: "vercel" },
+    );
+  }
+
+  let json: VercelChatCompletionsResponse;
+  try {
+    json = (await res.json()) as VercelChatCompletionsResponse;
+  } catch (err: unknown) {
+    throw new InferenceError(
+      "response_malformed",
+      `Vercel AI Gateway: invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      { provider: args.provider, model: args.model, backend: "vercel" },
+    );
+  }
+
+  const text = json.choices?.[0]?.message?.content ?? "";
+  if (typeof text !== "string" || text.length === 0) {
+    throw new InferenceError(
+      "response_malformed",
+      "Vercel AI Gateway returned no message content",
+      { provider: args.provider, model: args.model, backend: "vercel" },
+    );
+  }
+
+  return {
+    text,
+    promptTokens: json.usage?.prompt_tokens ?? 0,
+    completionTokens: json.usage?.completion_tokens ?? 0,
+  };
+}
+
+interface VercelChatCompletionsResponse {
+  readonly choices?: ReadonlyArray<{
+    readonly message?: { readonly content?: string };
+  }>;
+  readonly usage?: {
+    readonly prompt_tokens?: number;
+    readonly completion_tokens?: number;
+  };
 }
 
 // ---------------------------------------------------------------------------

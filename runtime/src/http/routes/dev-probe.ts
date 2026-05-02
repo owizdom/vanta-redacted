@@ -24,6 +24,7 @@
  */
 
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 
 import { AttestClient } from "@layr-labs/ecloud-sdk/attest";
 import type { FastifyInstance } from "fastify";
@@ -147,6 +148,33 @@ export async function registerDevProbeRoute(app: FastifyInstance): Promise<void>
       gatewayError = err instanceof Error ? err.message : String(err);
     }
 
+    const kmsServerURL = process.env["KMS_SERVER_URL"] ?? null;
+    const kmsPublicKeyPresent = (process.env["KMS_PUBLIC_KEY"] ?? "").length > 0;
+    const kmsPublicKeyFingerprint = (() => {
+      const key = process.env["KMS_PUBLIC_KEY"] ?? "";
+      if (key.length === 0) return null;
+      const stripped = key
+        .replace(/-----[A-Z ]+-----/g, "")
+        .replace(/\s/g, "");
+      try {
+        const buf = Buffer.from(stripped, "base64");
+        return createHash("sha256").update(buf).digest("hex").slice(0, 32);
+      } catch {
+        return "decode_error";
+      }
+    })();
+
+    let kmsHealth: { status: number | null; body_excerpt: string; error: string | null } | null = null;
+    if (typeof kmsServerURL === "string" && kmsServerURL.length > 0) {
+      try {
+        const r = await fetch(`${kmsServerURL.replace(/\/$/, "")}/health`, { method: "GET" });
+        const t = await r.text();
+        kmsHealth = { status: r.status, body_excerpt: t.slice(0, 256), error: null };
+      } catch (err) {
+        kmsHealth = { status: null, body_excerpt: "", error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
     return {
       stage: "probe_complete",
       request: {
@@ -154,6 +182,12 @@ export async function registerDevProbeRoute(app: FastifyInstance): Promise<void>
         gateway_path: path,
         audience,
         minted_via: mintedVia,
+      },
+      kms: {
+        server_url: kmsServerURL,
+        public_key_present: kmsPublicKeyPresent,
+        public_key_fingerprint_sha256_16: kmsPublicKeyFingerprint,
+        health: kmsHealth,
       },
       jwt_header: decoded.header,
       jwt_claims: decoded.claims,
