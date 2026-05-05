@@ -1,7 +1,7 @@
 /**
  * VANTA — population bots (v0.1, ambient layer).
  *
- * Two mineflayer bots — Ada and Ren — that wander between landmarks and
+ * Two mineflayer bots — Sarah and Mike — that wander between landmarks and
  * speak occasional canned lines pulled from the runtime's /bridge/town/:bot
  * endpoint. They exist to give the world a sense of life, not to exercise
  * any real bridge surface; v0.2's visit mode is when bots become
@@ -36,8 +36,8 @@ const LANDMARKS = {
 const LANDMARK_NAMES = Object.keys(LANDMARKS);
 
 const ROSTER = [
-  { name: "Ada", spawnDelayMs: 4000 },
-  { name: "Ren", spawnDelayMs: 9000 },
+  { name: "Sarah", spawnDelayMs: 4000 },
+  { name: "Mike",  spawnDelayMs: 9000 },
 ];
 
 const log = (name, msg) => console.log(`[vanta-pop:${name}] ${msg}`);

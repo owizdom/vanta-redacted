@@ -15,7 +15,7 @@ Three containers, one extra runtime flag:
 | Service | Container | Port  | What it does                                              |
 |---------|-----------|-------|-----------------------------------------------------------|
 | paper   | paper     | 25565 | PaperMC 1.21.4 + the vanta-bridge plugin (Kotlin)         |
-| npcs    | npcs      | —     | Wizard + Ada + Ren — mineflayer bots wandering the tower  |
+| npcs    | npcs      | —     | Wizard + Sarah + Mike — mineflayer bots wandering tower   |
 | viewer  | viewer    | 8080+ | CameraBot + prismarine-viewer WebGL on :8080, menu :8081  |
 
 Outside this stack:
@@ -56,7 +56,7 @@ When the stack is up:
 - The bare WebGL canvas alone is at `http://localhost:8080/`
 
 You should see the wizard standing at his desk in the centre of the tower
-within ~30 seconds, then Ada and Ren wander in shortly after (they wait
+within ~30 seconds, then Sarah and Mike wander in shortly after (they wait
 for `/bridge/wizard/online` to flip true before connecting).
 
 ## Verifying the rendering loop
@@ -98,7 +98,7 @@ host:25565 ── paper container
                 │  Bukkit world: tower + landmarks
                 ↑
 host (no port)  npcs container
-                │  Wizard.js, Population.js (Ada, Ren) via mineflayer
+                │  Wizard.js, Population.js (Sarah, Mike) via mineflayer
                 ↑
 host:8080  ── viewer container ── WebGL canvas (CameraBot)
 host:8081  ── viewer container ── menu + launcher + chat panel
