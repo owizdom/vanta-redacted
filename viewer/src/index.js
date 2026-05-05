@@ -95,6 +95,13 @@ function spawnCameraBot() {
     console.log(
       `[vanta-viewer] bot spawned at ${bot.entity.position.toString()}`,
     );
+    // Mineflayer's client-side gravity simulation pulls the bot down
+    // every tick — even when the server has set isFlying=true. The
+    // bridge-plugin teleports CameraBot to an elevated NW-facing
+    // vantage 1s after join; without disabling client physics the
+    // bot falls back to the plaza, leaving the canvas pointed at
+    // the ground.
+    bot.physicsEnabled = false;
     if (!viewerStarted) {
       const { mineflayer: viewerForBot } = prismarineViewer;
       viewerForBot(bot, {
@@ -105,7 +112,6 @@ function spawnCameraBot() {
       viewerStarted = true;
       console.log(`[vanta-viewer] world canvas at http://localhost:${VIEWER_PORT}`);
     }
-    bot.lookAt(bot.entity.position.offset(0, 1, 0));
     chatPanel.attachBot(bot);
   });
 }

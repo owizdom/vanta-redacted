@@ -158,7 +158,18 @@ class PlayerListener(private val plugin: JavaPlugin) : Listener {
                     // at (0, 65, -1). yaw=0 = facing south = visitors.
                     val desk = Location(world, 0.5, 65.0, -0.5, 0f, 0f)
                     player.teleport(desk)
-                } else if (player.name != "CameraBot") {
+                } else if (player.name == "CameraBot") {
+                    // Elevated SE vantage looking NW toward the tower
+                    // complex (centered around 0,65,0; landmarks span
+                    // x:[-25..25], z:[-40..35]). Flight is enabled so
+                    // gravity doesn't drop the bot back to the plaza
+                    // (no block exists at y=78 to stand on).
+                    player.allowFlight = true
+                    player.isFlying = true
+                    val world = player.world
+                    val cam = Location(world, 35.5, 78.0, 35.5, 135f, 15f)
+                    player.teleport(cam)
+                } else {
                     // Every other NPC (and any later human visitor)
                     // arrives at the southern town gate. The bot loop
                     // then walks them to their home zone, so visitors
