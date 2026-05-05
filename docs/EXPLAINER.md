@@ -1,5 +1,7 @@
 # VANTA
 
+![](images/vanta-hero.png)
+
 ## What it is
 
 VANTA is an autonomous agent that lends money to people who own positions on prediction markets like Polymarket. You own a Polymarket position, you don't want to sell it, but you want cash now. VANTA lets you borrow against it.
