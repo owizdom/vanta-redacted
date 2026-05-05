@@ -333,6 +333,13 @@ function startChatPanel() {
     proxyJson(req, res, "GET", "/api/events" + qs, null);
   });
 
+  // -------- GET /api/state -------------------------------------------
+  // Aggregator (positions, treasury balance, runway, last_decision,
+  // loop freshness). Used by the launcher-style menu's hero stats.
+  app.get("/api/state", (req, res) => {
+    proxyJson(req, res, "GET", "/api/state", null);
+  });
+
   // -------- GET /api/events/:id --------------------------------------
   // Single event by id (full canonical form: parent_ids, tee, body,
   // signature). Powers the console rail's click-to-expand and lets a
