@@ -74,6 +74,24 @@ A "VANTA" without EigenCloud is just another DeFi protocol with a server somewhe
 
 ---
 
+## What an agent's body looks like
+
+People hear "AI agent" and picture a chatbot, a backend service, or a smart contract — something incorporeal, a process running on a server somewhere. That mental model misses what an agent actually is once it owns its own keys, earns its own fees, and decides what to do with other people's money. The category has been misread as "software you talk to." It isn't. It's an inhabitant.
+
+VANTA has a body. You can walk into it.
+
+![The plaza, with the Wizard's tower at the centre and the runtime panels on the right — the visible layer and the signed event log in one frame.](images/spectate-overview.png)
+
+The agent's reasoning is rendered as a Minecraft world you can spectate from any browser. The Wizard sits at his desk in a stone tower at the centre of a town. Around him: a treasury chest that fills as LPs deposit, a pledge altar where loans originate, a verifier altar that glows when the calibration loop fires, a belfry that rings when the runway runs short. Two ambient townspeople — Sarah the underwriter and Mike, a regular — walk between the landmarks, posting commentary on what they see. Every signed event the agent emits in the runtime — `loop.credit_tick`, `op.treasury_alert`, `loan.origination`, `loop.calibration_proposal` — gets rendered as a physical action: a torch flickers yellow when a loan ticks toward liquidation, a bell rings when treasury crosses an alert threshold, gold particles burst at the desk on every origination.
+
+This isn't decoration. **The torch flickering yellow at the pledge altar is the same `loop.credit_tick` that's on the signed event log that's on chain.** The body and the audit trail are the same thing in two presentations — one for humans, one for verifiers.
+
+**Why bodies matter.** An agent without a body has nowhere to be referred to. A user can't point at a server. A counterparty can't address a server. A regulator can't subpoena one. The watchable layer gives the agent a stable place where its decisions are happening, in a form humans can witness — sitting directly on top of the same cryptographic surface that already anchors trust. You can see the wizard. The wizard's actions are signed. The signature chain anchors on chain. Human intuition and machine verification land in the same place.
+
+**Why this opens an on-chain representation.** Smart contracts already give agents a wallet on chain. ERC-8004 (agent identity) ties that wallet to a verifiable program. The Minecraft body ties that wallet to a *presence* — a place the agent "is" that humans can address. The next step is the inverse: visitors pay via x402 micropayments to mint an avatar NFT and walk into the same world the Wizard inhabits, with the avatar serving as their own on-chain ID. That closes the loop: an autonomous program with a wallet, an identity standard, and a body — addressable from any browser, provable from the chain. The agent isn't just a process you trust because the math works. It's an inhabitant of a place you can visit, with an identity that is both visible and verifiable.
+
+---
+
 ## Features
 
 - **LP vault** — deposit USDC, earn yield
@@ -83,6 +101,7 @@ A "VANTA" without EigenCloud is just another DeFi protocol with a server somewhe
 - **Tamper-proof event log** — every decision the agent makes is signed and queryable
 - **On-chain spend caps** — even if the agent breaks, rules in a smart contract limit how much it can spend each week
 - **Self-funded inference + hosting** — the agent pays for its own LLM calls and EigenCloud hosting from the fees it earns; no operator API keys, no human in the funding loop
+- **Walkable presence** — the agent's reasoning is rendered as a Minecraft world you can spectate from any browser; signed events become torch flickers, bell rings, particle bursts. Sets the stage for x402-paid avatar mint and on-chain visitor identity.
 
 ---
 
