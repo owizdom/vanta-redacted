@@ -159,12 +159,14 @@ class PlayerListener(private val plugin: JavaPlugin) : Listener {
                     val desk = Location(world, 0.5, 65.0, -0.5, 0f, 0f)
                     player.teleport(desk)
                 } else if (player.name == "CameraBot") {
-                    // SE-corner ground vantage on the plaza, facing NW
-                    // toward the tower complex (centered at 0,65,0;
-                    // landmarks span x:[-25..25], z:[-40..35]). Plaza
-                    // floor is y=64, so feet at y=64 = standing.
+                    // South centerline of the plaza, facing north (yaw=180)
+                    // for an unobstructed view of the tower complex —
+                    // wizard's desk at (0,65,0) sits 50 blocks ahead with
+                    // pledge / belfry / verifier landmarks in the same
+                    // frame. Avoids the SE gate arch which blocked the
+                    // earlier corner vantage.
                     val world = player.world
-                    val cam = Location(world, 50.5, 64.0, 50.5, 135f, 0f)
+                    val cam = Location(world, 0.5, 64.0, 50.5, 180f, 0f)
                     player.teleport(cam)
                 } else {
                     // Every other NPC (and any later human visitor)

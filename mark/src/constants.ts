@@ -42,11 +42,12 @@ export const CROSS_CHECK_MAX_DEVIATION = 0.02 as const;
 export const POLL_INTERVAL_SECONDS = 30 as const;
 
 /**
- * SPKI SHA-256 pin, 64-char lowercase hex, captured 2026-04-24 off the
- * wildcard Google Trust Services leaf that serves `*.polymarket.com`.
+ * SPKI SHA-256 pin, 64-char lowercase hex, captured 2026-05-05 off the
+ * wildcard Google Trust Services leaf that serves `*.polymarket.com`
+ * (clob.polymarket.com + data-api.polymarket.com both hash to this pin).
  * Google rotates leaves every 60-90 days; SPKI pins survive leaf rotation
  * as long as the keypair is stable. Pin-set (see `http.ts`) is recommended
  * so rotation doesn't break us mid-epoch.
  */
 export const TLS_SPKI_SHA256_PIN =
-  "0652e1f131396c2c42b0a8e748cae8fc9ce34d46ba9b9c8953ce188ec3b4a3cc" as const;
+  "435db2cbbbd932a737558e08b2e9b56b767be33d95d7d139a4793c73796376e9" as const;
