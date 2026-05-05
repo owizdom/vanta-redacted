@@ -50,7 +50,14 @@ const TAG_RULES: ReadonlyArray<{ readonly re: RegExp; readonly tags: readonly st
   { re: /(bitcoin|btc|eth|ether|crypto|sol)/i, tags: ["crypto-price"] },
 ];
 
-function tagsFor(text: string): readonly string[] {
+/**
+ * Map a market's question text to its onboarding tags. Exported so the
+ * exposure-reader can bucket existing active-loan exposure with the
+ * exact same regex set the onboarding feed uses — keeping tag identity
+ * consistent between origination-time bookkeeping and credit-loop
+ * monitoring.
+ */
+export function tagsFor(text: string): readonly string[] {
   for (const r of TAG_RULES) {
     if (r.re.test(text)) return r.tags;
   }

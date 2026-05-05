@@ -40,8 +40,8 @@ A smart contract follows fixed rules — *if X then Y*. It can't read a live Pol
 So VANTA actually thinks. For every loan it considers — and every open loan it monitors — the agent runs this loop:
 
 1. **Read the market.** Pull the live Polymarket book, recent trades, price history, any disputes on record.
-2. **Reason over it.** Call an LLM (Claude, GPT, or Gemini — the agent rotates between providers daily so it isn't pinned to one model's bias) with the market data and the borrower's request. The LLM produces a structured judgment: lend or not, at what rate, with what haircut.
-3. **Cross-check.** A separate loop re-evaluates every open loan every few minutes — re-marking it, watching for the underlying market drifting against it.
+2. **Reason over it.** Call an LLM (Claude, GPT, or Gemini — the agent rotates research roles daily across providers so it isn't pinned to one model's bias; chat-facing roles stay on Claude for voice consistency) with the market data and the borrower's request. The LLM produces a structured judgment: lend or not, at what rate, with what haircut.
+3. **Watch and re-mark.** The credit loop ticks every minute, re-pricing every open loan against the live Polymarket book. If a position drifts too close to the liquidation line, the agent flags it. Separately, a weekly calibration loop replays past loan outcomes to see if the agent's own pricing parameters need tuning — not per-loan monitoring, but long-horizon model fitness.
 4. **Sign the decision.** Every reasoning step — every prompt, every model response, every conclusion — is hashed, signed by the TEE-resident key, and written to the agent's tamper-proof event log.
 
 That last step is what nobody else does. Most "AI agents" call an LLM and trust the output. **VANTA's whole reasoning trail is auditable** — anyone can pull up the exact inputs the LLM saw, the exact response it gave, and the decision the agent made off the back of it. If the agent ever lent against a bad position, you can trace exactly why.
@@ -78,7 +78,7 @@ A "VANTA" without EigenCloud is just another DeFi protocol with a server somewhe
 
 - **LP vault** — deposit USDC, earn yield
 - **Autonomous origination** — the agent underwrites every loan itself
-- **LLM-driven reasoning** — every loan decision is made by an LLM (Claude / GPT / Gemini, rotating daily) reading live market data, with the prompt and response signed and logged
+- **LLM-driven reasoning** — every loan decision is made by an LLM (Claude / GPT / Gemini, with research roles rotating daily across providers and chat-facing roles pinned to Claude for voice consistency) reading live market data, with the prompt and response signed and logged
 - **Real-time marks** — every open loan is re-priced as the underlying market moves
 - **Tamper-proof event log** — every decision the agent makes is signed and queryable
 - **On-chain spend caps** — even if the agent breaks, rules in a smart contract limit how much it can spend each week

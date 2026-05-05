@@ -48,22 +48,24 @@ import { registerMarketsRoutes } from "./http/routes/markets.js";
 import { registerServiceRoutes } from "./http/routes/services.js";
 import { registerStateRoute } from "./http/routes/state.js";
 import { registerDevProbeRoute } from "./http/routes/dev-probe.js";
+import { createCreditObserver } from "./services/credit-observer.js";
+import { createExposureReader } from "./services/exposure-reader.js";
 import { createMarkLoop } from "./services/mark-loop.js";
 import {
   createOperationalReader,
   type OperationalReader,
 } from "./services/operational-snapshot.js";
+import { createReplayDataset } from "./services/replay-dataset.js";
 import { installX402Hook, type X402RouteConfig } from "./services/x402.js";
 
 import { createCreditLoop, type ActiveLoanView } from "./loops/credit.js";
-import { createModelLoop, type ReplayRow } from "./loops/model.js";
+import { createModelLoop } from "./loops/model.js";
 import {
   createOperationalLoop,
   type OperationalSnapshot,
 } from "./loops/operational.js";
 import { createOnboardingLoop, createGatewayJudge, type JudgeFn } from "./onboarding/index.js";
 import type { CandidateInputs } from "./onboarding/types.js";
-import type { ExposureSnapshot } from "./onboarding/reasoning.js";
 import { buildCandidateBatch } from "./services/candidate-feed.js";
 import type { EventSink, LoopContext, ReasoningLoop } from "./loops/types.js";
 
@@ -140,38 +142,6 @@ function listActiveLoansForCreditLoop(
   };
 }
 
-/**
- * Stubbed observation — Phase 11 wires the live Polymarket + UMA path
- * via @vanta/mark and @vanta/venue-poly. The fixture keeps the loop
- * emitting well-formed signed events the verifier can walk; the model
- * + operational loops follow the same pattern.
- */
-async function stubCreditObservation(): Promise<{
-  readonly best_bid: string;
-  readonly twap_30min: string;
-  readonly depth_5pct_usdc: string;
-  readonly dispute_30d_count: number;
-  readonly time_to_resolution_seconds: number;
-}> {
-  return {
-    best_bid: "0.5",
-    twap_30min: "0.5",
-    depth_5pct_usdc: "300000000000",
-    dispute_30d_count: 0,
-    time_to_resolution_seconds: 60 * 60 * 24 * 30,
-  };
-}
-
-async function stubReplayDataset(): Promise<{
-  readonly rows: readonly ReplayRow[];
-  readonly dataset_hash: Sha256Hex;
-}> {
-  return {
-    rows: [],
-    dataset_hash: asSha256Hex("0".repeat(64)),
-  };
-}
-
 async function stubOperationalSnapshot(): Promise<OperationalSnapshot> {
   // Retained only for the smoke entrypoint / unit tests. Production
   // wiring uses createOperationalReader (real chain reads). See main()
@@ -194,13 +164,6 @@ async function stubOperationalSnapshot(): Promise<OperationalSnapshot> {
 
 async function emptyCandidates(): Promise<readonly CandidateInputs[]> {
   return [];
-}
-
-async function stubFetchExposure(): Promise<ExposureSnapshot> {
-  return {
-    per_tag_usdc: new Map(),
-    open_market_ids: new Set(),
-  };
 }
 
 // -----------------------------------------------------------------------
@@ -324,12 +287,12 @@ async function startMain(): Promise<void> {
   const creditLoop = createCreditLoop({
     ctx,
     listActiveLoans: listActiveLoansForCreditLoop(boot),
-    observe: async () => stubCreditObservation(),
+    observe: createCreditObserver({ marketsCache: boot.marketsCache }),
     tickSeconds: 60,
   });
   const modelLoop = createModelLoop({
     ctx,
-    fetchDataset: stubReplayDataset,
+    fetchDataset: createReplayDataset({ eventsStore: boot.log }),
     tickSeconds: 7 * 24 * 60 * 60,
   });
   // Real operational snapshot — reads treasury USDC, native balances,
@@ -415,7 +378,10 @@ async function startMain(): Promise<void> {
   const onboardingLoop = createOnboardingLoop({
     ctx,
     fetchCandidates,
-    fetchExposure: stubFetchExposure,
+    fetchExposure: createExposureReader({
+      loanRegistry: boot.loanRegistry,
+      marketsCache: boot.marketsCache,
+    }),
     // Only attach the judge when present (exactOptionalPropertyTypes).
     ...(judge !== undefined ? { judge } : {}),
     tickSeconds: 6 * 60 * 60,
