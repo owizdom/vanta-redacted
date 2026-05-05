@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>VANTA · the company you can walk inside</title>
+  <style>
+    :root {
+      --bg: #0a0d12;
+      --fg: #e8eef5;
+      --dim: #7e8a99;
+      --gold: #d4af37;
+      --rule: #1a232f;
+      --accent: #6db1ff;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+      min-height: 100vh;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      padding: 4rem 2rem;
+    }
+    .frame {
+      max-width: 720px;
+      width: 100%;
+    }
+    .heading {
+      font-size: 1.05rem;
+      letter-spacing: 0.18em;
+      color: var(--dim);
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+    }
+    h1 {
+      font-size: 2.4rem;
+      font-weight: 500;
+      letter-spacing: -0.01em;
+      margin: 0 0 0.6rem;
+    }
+    h1 .gold { color: var(--gold); }
+    .lede {
+      color: var(--dim);
+      font-size: 1.05rem;
+      line-height: 1.55;
+      max-width: 56ch;
+      margin: 0 0 3rem;
+    }
+    .doors {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.2rem;
+    }
+    @media (max-width: 640px) {
+      .doors { grid-template-columns: 1fr; }
+    }
+    .door {
+      display: block;
+      padding: 1.6rem 1.5rem 1.4rem;
+      background: transparent;
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      color: var(--fg);
+      text-decoration: none;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .door:hover {
+      background: rgba(109, 177, 255, 0.05);
+      border-color: var(--accent);
+    }
+    .door .verb {
+      font-size: 1.4rem;
+      letter-spacing: -0.005em;
+      margin-bottom: 0.25rem;
+    }
+    .door .price {
+      font-size: 0.78rem;
+      color: var(--dim);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 0.85rem;
+    }
+    .door p {
+      margin: 0;
+      font-size: 0.92rem;
+      line-height: 1.5;
+      color: var(--dim);
+    }
+    .door[data-state="soon"] {
+      opacity: 0.78;
+    }
+    .door[data-state="soon"] .price {
+      color: var(--gold);
+    }
+    .footer {
+      margin-top: 2.4rem;
+      font-size: 0.78rem;
+      color: var(--dim);
+      letter-spacing: 0.06em;
+    }
+    .footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="heading">vanta</div>
+    <h1>the company you can <span class="gold">walk inside</span>.</h1>
+    <p class="lede">
+      VANTA is an autonomous prediction-market lender running entirely inside
+      a hardware-secured box on EigenCloud. It thinks, lends, marks, and pays
+      its own bills with no human in the loop. Choose how you'd like to see it.
+    </p>
+
+    <div class="doors">
+      <a class="door" href="/spectate">
+        <div class="verb">Spectate ↗</div>
+        <div class="price">free · no wallet</div>
+        <p>
+          Watch the agent reason in third-person. The wizard at the desk, the
+          underwriter making the rounds, the calibration loop firing on cadence.
+          Every animation traces back to a signed event in the on-chain log.
+        </p>
+      </a>
+      <a class="door" data-state="soon" href="/visit-soon">
+        <div class="verb">Visit →</div>
+        <div class="price">v0.2 · ~$0.50 USDC via x402</div>
+        <p>
+          Mint your own avatar (ERC-721, Base Sepolia) and walk the tower
+          first-person. Talk to the wizard. Pledge a position. Every action
+          you take is signed and joins the agent's audit log.
+        </p>
+      </a>
+    </div>
+
+    <div class="footer">
+      built on EigenCloud · <a href="https://github.com/owizdom/vanta">source</a> · <a href="/console">console</a>
+    </div>
+  </div>
+</body>
+</html>

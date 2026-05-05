@@ -48,6 +48,7 @@ import { registerMarketsRoutes } from "./http/routes/markets.js";
 import { registerServiceRoutes } from "./http/routes/services.js";
 import { registerStateRoute } from "./http/routes/state.js";
 import { registerDevProbeRoute } from "./http/routes/dev-probe.js";
+import { registerBridgeRoutes } from "./http/routes/bridge.js";
 import { createCreditObserver } from "./services/credit-observer.js";
 import { createExposureReader } from "./services/exposure-reader.js";
 import { createMarkLoop } from "./services/mark-loop.js";
@@ -197,6 +198,10 @@ async function startMain(): Promise<void> {
   await registerMarketsRoutes(app, { marketsCache: boot.marketsCache });
   await registerHealthRoute(app, { bootstrap: boot });
   await registerDevProbeRoute(app);
+  if (config.watchableEnabled) {
+    await registerBridgeRoutes(app);
+    app.log.info("watchable: bridge routes registered (WATCHABLE_ENABLED=1)");
+  }
 
   const quotePriceUsdc6 = BigInt(Math.round(config.x402.quotePriceUsdc * 1_000_000));
   const markPriceUsdc6 = BigInt(Math.round(config.x402.markPriceUsdc * 1_000_000));

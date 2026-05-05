@@ -175,6 +175,15 @@ const RawConfig = z.object({
   PAYOUTS_INFERENCE_WEEKLY_USDC6: z.coerce.bigint().default(10_000_000n),  // $10
   PAYOUTS_INFERENCE_CONSTITUTIONAL_REF: z.string().default(""),
   PAYOUTS_INFERENCE_X402_URL: z.string().default(""),
+
+  // ----- vanta-watchable v0.1 (Minecraft visualizer layer) -----
+  // Off by default. When set, registers the `/bridge/*` routes used by
+  // the Paper plugin + npc bots. The watchable docker-compose stack
+  // expects this on; nothing else does. Adding routes is purely additive
+  // (no chain reads, no event-log writes from the bridge surface) so it
+  // can stay on safely; default-off is just a defense against operators
+  // accidentally exposing the surface in a non-watchable deploy.
+  WATCHABLE_ENABLED: z.coerce.boolean().default(false),
 });
 
 export interface InferenceModelSlugs {
@@ -252,6 +261,7 @@ export interface RuntimeConfig {
   readonly inference: InferenceConfig;
   readonly x402: X402Config;
   readonly payouts: PayoutsConfig;
+  readonly watchableEnabled: boolean;
 }
 
 interface DeploymentsBaseSepolia {
@@ -372,6 +382,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
       internalSecret: raw.VANTA_INTERNAL_SECRET,
     },
     payouts: buildPayoutsConfig(raw),
+    watchableEnabled: raw.WATCHABLE_ENABLED,
   };
 }
 

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 140" fill="none" stroke="none">
+  <!-- Wizard silhouette: hat + face + robe. Two CSS-var-driven fills:
+       --robe-color (body) and --skin-tint (face). -->
+  <!-- Hat -->
+  <path d="M50 6 L34 38 L66 38 Z" fill="var(--robe-color, #5d72d6)" />
+  <ellipse cx="50" cy="38" rx="18" ry="3" fill="var(--robe-color, #5d72d6)" opacity="0.85" />
+  <!-- Face -->
+  <ellipse cx="50" cy="50" rx="11" ry="13" fill="var(--skin-tint, #f3d3a5)" />
+  <!-- Beard -->
+  <path d="M40 56 Q50 78 60 56 Q58 70 50 74 Q42 70 40 56 Z" fill="#e6edf3" opacity="0.92" />
+  <!-- Robe body (trapezoid) -->
+  <path d="M30 64 L70 64 L82 130 L18 130 Z" fill="var(--robe-color, #5d72d6)" />
+  <!-- Sleeves -->
+  <path d="M30 66 L18 100 L24 102 L36 70 Z" fill="var(--robe-color, #5d72d6)" opacity="0.88" />
+  <path d="M70 66 L82 100 L76 102 L64 70 Z" fill="var(--robe-color, #5d72d6)" opacity="0.88" />
+  <!-- Robe stripe accent (gold) -->
+  <path d="M48 64 L52 64 L54 130 L46 130 Z" fill="rgba(255, 204, 102, 0.72)" />
+  <!-- Eyes -->
+  <circle cx="46" cy="48" r="1.2" fill="#0e1116" />
+  <circle cx="54" cy="48" r="1.2" fill="#0e1116" />
+</svg>

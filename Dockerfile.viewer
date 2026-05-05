@@ -1,17 +1,30 @@
-# Stub — filled in Phase 10 (Mineflayer headless + prismarine-viewer browser spectator).
-FROM node:20.11.0-slim
-
-# Native deps for prismarine-viewer / canvas.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
-    && rm -rf /var/lib/apt/lists/*
-
+# syntax=docker/dockerfile:1.7
+# VANTA browser-spectator viewer (§1.6).
+#
+# Headless `mineflayer` bot + `prismarine-viewer` WebGL renderer.
+# Connects to the `paper` service in the same compose network at
+# port 25565, renders chunks to http://localhost:8080. Visitors open
+# the URL and walk the world in a browser — no Java client install.
+FROM node:20.11-slim
 WORKDIR /app
 
+# Native deps for prismarine-viewer's canvas backend (node-canvas
+# transitively pulls cairo/pango on Linux). Slim image lacks them.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       build-essential \
+       libcairo2-dev \
+       libpango1.0-dev \
+       libjpeg-dev \
+       libgif-dev \
+       librsvg2-dev \
+       python3 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY viewer/package.json ./
+RUN npm install --omit=dev
+
 COPY viewer/src ./src
 
-# RUN npm install   # uncomment in Phase 10
 EXPOSE 8080 8081
-
 CMD ["node", "src/index.js"]

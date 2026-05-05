@@ -1,0 +1,20 @@
+{
+  "name": "vanta-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser-based spectator for the VANTA Minecraft world (paper §1.6).",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "canvas": "^2.11.2",
+    "express": "^4.21.2",
+    "mineflayer": "^4.27.0",
+    "prismarine-viewer": "^1.32.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

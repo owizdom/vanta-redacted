@@ -1,10 +1,15 @@
-# Stub — filled in Phase 10 (Mineflayer headless bots: wizard + population per paper §7.4).
-FROM node:20.11.0-slim
-
+# syntax=docker/dockerfile:1.7
+# VANTA NPCs (§1.3 wizard, §1.4 population bots).
+#
+# Headless Mineflayer bots that join the paper server as autonomous
+# entities. Each gets its own forever-loop on the runtime's bridge
+# endpoints for LLM-generated dialogue.
+FROM node:20.11-slim
 WORKDIR /app
 
 COPY npcs/package.json ./
+RUN npm install --omit=dev
+
 COPY npcs/src ./src
 
-# RUN npm install   # uncomment in Phase 10 once package.json has deps
 CMD ["node", "src/index.js"]

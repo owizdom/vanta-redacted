@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>VANTA · Visit (coming v0.2)</title>
+  <style>
+    :root {
+      --bg: #0a0d12;
+      --fg: #e8eef5;
+      --dim: #7e8a99;
+      --gold: #d4af37;
+      --rule: #1a232f;
+      --accent: #6db1ff;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+      min-height: 100vh;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      padding: 4rem 2rem;
+    }
+    .frame {
+      max-width: 640px;
+      width: 100%;
+    }
+    .crumb {
+      font-size: 0.85rem;
+      color: var(--dim);
+      letter-spacing: 0.06em;
+      margin-bottom: 2rem;
+    }
+    .crumb a { color: var(--accent); text-decoration: none; }
+    .crumb a:hover { text-decoration: underline; }
+    h1 {
+      font-size: 2.0rem;
+      font-weight: 500;
+      letter-spacing: -0.005em;
+      margin: 0 0 0.4rem;
+    }
+    .price {
+      color: var(--gold);
+      font-size: 0.85rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 2rem;
+    }
+    section {
+      border-top: 1px solid var(--rule);
+      padding: 1.4rem 0;
+    }
+    section h2 {
+      font-size: 0.95rem;
+      letter-spacing: 0.04em;
+      margin: 0 0 0.6rem;
+      color: var(--fg);
+    }
+    section p {
+      margin: 0;
+      color: var(--dim);
+      line-height: 1.6;
+      font-size: 0.95rem;
+    }
+    section p code {
+      background: rgba(109, 177, 255, 0.08);
+      padding: 0.05rem 0.4rem;
+      border-radius: 3px;
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="crumb"><a href="/">← back to the door</a></div>
+    <h1>Visit · v0.2</h1>
+    <div class="price">~$0.50 USDC · paid via x402</div>
+
+    <section>
+      <h2>What you'll get</h2>
+      <p>
+        Mint an ERC-721 avatar on Base Sepolia. Sign one EIP-3009
+        transferWithAuthorization (no wallet popups, no MetaMask). The avatar
+        is your body in the tower; come back tomorrow with the same wallet,
+        you're still you, with whatever hat or sign you left behind.
+      </p>
+    </section>
+
+    <section>
+      <h2>What you can do inside</h2>
+      <p>
+        Walk first-person through the lobby, underwriting hall, treasury, and
+        history hall. Talk to the wizard at the lectern; he replies via the
+        same signed inference path the agent uses. Walk up to the LP-vault
+        chest and deposit USDC; walk to the pledge altar and pledge a
+        Polymarket position. Every action you take is itself a signed
+        event in the same audit log VANTA writes to.
+      </p>
+    </section>
+
+    <section>
+      <h2>Why pay at all</h2>
+      <p>
+        Visitor sessions cost the agent real money — Paper server CPU, the
+        wizard's inference calls, the ElevenLabs TTS for voiced lines. The
+        $0.50 covers your session and goes straight to VANTA's treasury via
+        the same <code>VendorPayment</code> contracts that bound the agent's
+        own spending. The agent funds the agent.
+      </p>
+    </section>
+
+    <section>
+      <h2>When</h2>
+      <p>
+        v0.2 ships once the v0.1 spectate stack proves out the rendering loop.
+        Roughly two to three weeks of work after that. Want a heads-up when
+        it lands? Drop a follow on
+        <a style="color: var(--accent); text-decoration: none;" href="https://github.com/owizdom/vanta">github.com/owizdom/vanta</a>
+        and watch the releases tab.
+      </p>
+    </section>
+  </div>
+</body>
+</html>
