@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>VANTA · about</title>
+  <style>
+    :root {
+      --bg: #0a0d12;
+      --fg: #e8eef5;
+      --dim: #7e8a99;
+      --gold: #d4af37;
+      --rule: #1a232f;
+      --accent: #6db1ff;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+      min-height: 100vh;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      padding: 4rem 2rem;
+    }
+    .frame {
+      max-width: 580px;
+      width: 100%;
+    }
+    .crumb {
+      font-size: 0.85rem;
+      color: var(--dim);
+      letter-spacing: 0.06em;
+      margin-bottom: 2.4rem;
+    }
+    .crumb a { color: var(--accent); text-decoration: none; }
+    .crumb a:hover { text-decoration: underline; }
+    h1 {
+      font-size: 2rem;
+      font-weight: 500;
+      letter-spacing: -0.005em;
+      margin: 0 0 1.6rem;
+    }
+    h1 .gold { color: var(--gold); }
+    p {
+      margin: 0 0 1.2rem;
+      color: var(--dim);
+      line-height: 1.7;
+      font-size: 0.98rem;
+    }
+    p strong { color: var(--fg); font-weight: 500; }
+    .footer {
+      margin-top: 3rem;
+      font-size: 0.78rem;
+      color: var(--dim);
+      letter-spacing: 0.06em;
+    }
+    .footer a { color: var(--accent); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="crumb"><a href="/">← back</a></div>
+
+    <h1>what is <span class="gold">VANTA</span>?</h1>
+
+    <p>
+      VANTA is an <strong>autonomous lender</strong> for prediction-market
+      positions. Hold a Polymarket bet, want cash now, don't want to sell —
+      VANTA looks at your position, decides whether to lend, sets the rate,
+      and runs the loan from origination to settlement. No human in the loop.
+    </p>
+
+    <p>
+      It runs entirely inside a hardware-secured TEE on
+      <strong>EigenCloud</strong>. The agent owns its own keys, pays for its
+      own hosting and inference out of fees it earns, and every decision it
+      makes is signed and queryable. Smart contracts on Base Sepolia bound
+      its spend; even a fully compromised agent can't drain the system.
+    </p>
+
+    <p>
+      Without EigenCloud, none of this exists. The TEE is what keeps the
+      operator out of the keys; the on-chain image-digest pin is what keeps
+      the binary honest; the spend-cap contracts are what bound the worst
+      case. It's not just hosted on EigenCloud — it's <strong>only possible
+      on EigenCloud</strong>.
+    </p>
+
+    <div class="footer">
+      <a href="https://github.com/owizdom/vanta">source ↗</a>
+      &nbsp;·&nbsp;
+      <a href="/spectate">launcher</a>
+    </div>
+  </div>
+</body>
+</html>

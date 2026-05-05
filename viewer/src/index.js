@@ -505,6 +505,10 @@ function startChatPanel() {
     res.set("content-type", "text/html; charset=utf-8");
     res.send(VISIT_SOON_HTML);
   });
+  app.get("/about", (_req, res) => {
+    res.set("content-type", "text/html; charset=utf-8");
+    res.send(ABOUT_HTML);
+  });
   app.get("/console", (_req, res) => {
     res.set("content-type", "text/html; charset=utf-8");
     res.send(CONSOLE_HTML);
@@ -605,3 +609,4 @@ const LAUNCHER_HTML = readFileSync(resolve(__dirname, "launcher.html"), "utf8");
 const CONSOLE_HTML = readFileSync(resolve(__dirname, "console.html"), "utf8");
 const MENU_HTML = readFileSync(resolve(__dirname, "menu.html"), "utf8");
 const VISIT_SOON_HTML = readFileSync(resolve(__dirname, "visit-soon.html"), "utf8");
+const ABOUT_HTML = readFileSync(resolve(__dirname, "about.html"), "utf8");
