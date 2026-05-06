@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: #0b0b0e;
+  color: #eeece5;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  overscroll-behavior: none;
+}
+
+::selection {
+  background: rgba(67, 224, 140, 0.32);
+  color: #f8f7f2;
+}
+
+/* Soft grid wash underneath the world canvas — lifts the dark UI
+ * without competing with the 3D scene. */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 96px 96px;
+  background-position: -1px -1px;
+  pointer-events: none;
+}
+
+/* Pixel-art image rendering for Kenney UI tiles (PNG sprites). */
+.pixelated {
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+/* 9-slice border using a Kenney UI tile as backdrop. The tile_0009
+ * panel (mid-row stone frame, brown bevel) tiles cleanly. */
+.kpanel {
+  background-image: url("/ui/tile_0009.png");
+  background-size: 64px 64px;
+  background-repeat: repeat;
+  image-rendering: pixelated;
+}
+
+/* Stage-light bloom under the menu — purple glow centred bottom. */
+.bloom-violet {
+  background:
+    radial-gradient(
+      40% 30% at 50% 110%,
+      rgba(155, 107, 255, 0.35) 0%,
+      rgba(155, 107, 255, 0) 60%
+    );
+  pointer-events: none;
+}

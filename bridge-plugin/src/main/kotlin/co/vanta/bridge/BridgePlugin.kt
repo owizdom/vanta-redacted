@@ -32,6 +32,15 @@ class BridgePlugin : JavaPlugin() {
             }
         }
 
+        // v3 multi-VANTA: build per-island plazas at deterministic
+        // ring offsets around the central VANTA-zero plaza. Pulls the
+        // agent list from the runtime's `/api/agents` route. Runtime
+        // may not be up at plugin-enable time (docker-compose ordering
+        // doesn't guarantee it), so the call is retried asynchronously
+        // for up to 60s on the Bukkit scheduler. Once the agent list
+        // arrives we hop back to the main thread to mutate world state.
+        scheduleIslandBuild(runtimeUrl)
+
         // Special-account hardening: the Wizard NPC walks through soul-
         // campfires at the tower doorway and was repeatedly dying;
         // make him invulnerable so his autonomous walk loop actually
@@ -72,6 +81,60 @@ class BridgePlugin : JavaPlugin() {
     private var wizardPin: WizardPin? = null
     private var chestRenderer: ChestRenderer? = null
     private var receiptPlaques: ReceiptPlaques? = null
+
+    /**
+     * Async-poll `/api/agents` for up to 60s. As soon as a non-empty
+     * list arrives, hop to the main thread and let IslandBuilder
+     * place the per-VANTA islands. Idempotent — IslandBuilder's own
+     * persistent flag means a second call after the islands are
+     * already placed is a no-op.
+     */
+    private fun scheduleIslandBuild(runtimeUrl: String) {
+        val fetcher = IslandRegistryFetcher(runtimeUrl)
+        val islandBuilder = IslandBuilder(this)
+        val plazaPartitioner = PlazaPartitioner(this)
+        val pollIntervalMs = 5_000L
+        Bukkit.getScheduler().runTaskAsynchronously(this, Runnable {
+            var attempts = 0
+            while (true) {
+                attempts++
+                val islands = try {
+                    fetcher.fetch()
+                } catch (e: Exception) {
+                    if (attempts <= 3 || attempts % 12 == 0) {
+                        logger.info("vanta-islands: attempt $attempts fetch threw (${e.message})")
+                    }
+                    emptyList()
+                }
+                if (islands.isNotEmpty()) {
+                    logger.info("vanta-islands: fetched ${islands.size} agents on attempt $attempts; placing")
+                    Bukkit.getScheduler().runTask(this, Runnable {
+                        for (world in Bukkit.getWorlds()) {
+                            try {
+                                islandBuilder.placeIfNeeded(world, islands)
+                            } catch (e: Exception) {
+                                logger.warning("vanta-islands: place failed in '${world.name}': ${e.message}")
+                            }
+                            try {
+                                plazaPartitioner.apply(world, islands)
+                            } catch (e: Exception) {
+                                logger.warning("vanta-plaza: partition failed in '${world.name}': ${e.message}")
+                            }
+                        }
+                    })
+                    return@Runnable
+                }
+                if (attempts <= 3 || attempts % 12 == 0) {
+                    logger.info("vanta-islands: attempt $attempts: runtime returned no agents; will retry")
+                }
+                try {
+                    Thread.sleep(pollIntervalMs)
+                } catch (_: InterruptedException) {
+                    return@Runnable
+                }
+            }
+        })
+    }
 
     override fun onDisable() {
         eventStream?.stop()

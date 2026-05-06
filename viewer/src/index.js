@@ -107,7 +107,7 @@ function spawnCameraBot() {
       viewerForBot(bot, {
         port: VIEWER_PORT,
         firstPerson: false,
-        viewDistance: 16,
+        viewDistance: 24,
       });
       viewerStarted = true;
       console.log(`[vanta-viewer] world canvas at http://localhost:${VIEWER_PORT}`);

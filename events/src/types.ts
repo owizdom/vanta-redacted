@@ -32,6 +32,13 @@ export type CanonicalJsonBytes = Uint8Array & {
  *
  * Month-2 addition: `op.inference` (audit record for an LLM call —
  * wizard, population bot, or model-loop role). API_FROZEN bumped to v2.
+ *
+ * v3 additions: trading-loop primaries (`trade.decision`,
+ * `trade.executed`, `trade.closed`), depositor flows
+ * (`pool.deposit`, `pool.withdraw`), belief snapshots
+ * (`belief.updated`), and the in-world island-selection event
+ * (`visitor.island_entered`). Every v3 body carries `agent_id` so
+ * fleet-host consumers can filter per-VANTA. API_FROZEN bumped to v3.
  */
 export type EventType =
   | "tee.attestation"
@@ -53,10 +60,21 @@ export type EventType =
   | "loop.calibration_proposal"
   | "loop.onboard_decision"
   | "op.treasury_alert"
-  | "op.operational_anomaly";
+  | "op.operational_anomaly"
+  | "trade.decision"
+  | "trade.executed"
+  | "trade.closed"
+  | "pool.deposit"
+  | "pool.withdraw"
+  | "belief.updated"
+  | "visitor.island_entered"
+  | "npc.thought"
+  | "council.synthesised";
 
 import type {
+  BeliefUpdatedBody,
   ConstitutionalGenesisBody,
+  CouncilSynthesisedBody,
   LoanLiquidationBody,
   LoanMarkBody,
   LoanMarkRevokedBody,
@@ -67,15 +85,22 @@ import type {
   LoopCalibrationProposalBody,
   LoopCreditTickBody,
   LoopOnboardDecisionBody,
+  NpcThoughtBody,
   OpInferenceBody,
   OpMarkGapBody,
   OpMarkSparseBody,
   OpOperationalAnomalyBody,
   OpTreasuryAlertBody,
+  PoolDepositBody,
+  PoolWithdrawBody,
   ReasoningTraceBody,
   TeeAttestationBody,
+  TradeClosedBody,
+  TradeDecisionBody,
+  TradeExecutedBody,
   TreasuryInflowBody,
   TreasuryOutflowBody,
+  VisitorIslandEnteredBody,
 } from "./bodies.js";
 
 /**
@@ -122,7 +147,16 @@ export type VantaEvent =
   | (VantaEventBase & { readonly type: "loop.calibration_proposal"; readonly body: LoopCalibrationProposalBody })
   | (VantaEventBase & { readonly type: "loop.onboard_decision"; readonly body: LoopOnboardDecisionBody })
   | (VantaEventBase & { readonly type: "op.treasury_alert"; readonly body: OpTreasuryAlertBody })
-  | (VantaEventBase & { readonly type: "op.operational_anomaly"; readonly body: OpOperationalAnomalyBody });
+  | (VantaEventBase & { readonly type: "op.operational_anomaly"; readonly body: OpOperationalAnomalyBody })
+  | (VantaEventBase & { readonly type: "trade.decision"; readonly body: TradeDecisionBody })
+  | (VantaEventBase & { readonly type: "trade.executed"; readonly body: TradeExecutedBody })
+  | (VantaEventBase & { readonly type: "trade.closed"; readonly body: TradeClosedBody })
+  | (VantaEventBase & { readonly type: "pool.deposit"; readonly body: PoolDepositBody })
+  | (VantaEventBase & { readonly type: "pool.withdraw"; readonly body: PoolWithdrawBody })
+  | (VantaEventBase & { readonly type: "belief.updated"; readonly body: BeliefUpdatedBody })
+  | (VantaEventBase & { readonly type: "visitor.island_entered"; readonly body: VisitorIslandEnteredBody })
+  | (VantaEventBase & { readonly type: "npc.thought"; readonly body: NpcThoughtBody })
+  | (VantaEventBase & { readonly type: "council.synthesised"; readonly body: CouncilSynthesisedBody });
 
 /** Per-type narrowing helper (spec §1.2). */
 export type VantaEventOfType<T extends EventType> = Extract<VantaEvent, { type: T }>;

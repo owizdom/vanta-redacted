@@ -31,6 +31,7 @@ import type {
   ReasoningLoop,
   ReasoningTraceBody,
 } from "./types.js";
+import type { NpcCouncil } from "../services/npc-council.js";
 
 /**
  * Minimal active-loan view the credit loop needs. The runtime's
@@ -100,6 +101,16 @@ export interface CreditLoopArgs {
   readonly tickSeconds?: number;
   /** Override sleep; tests bypass timers. */
   readonly sleepMs?: (ms: number) => Promise<void>;
+  /**
+   * Optional NPC council in lender mode. When present, each per-loan
+   * tick runs a council pass after the LTV-based heuristic so the
+   * trace cites which townsfolk weighed in. The council never blocks
+   * the tick — failures fall back to the unaugmented flag silently.
+   * The council's `mode` MUST be "lending" (caller's responsibility).
+   */
+  readonly council?: NpcCouncil;
+  /** Optional agent_id to thread through council requests. */
+  readonly agent_id?: number;
 }
 
 /**
@@ -166,12 +177,13 @@ function buildTraceBody(args: {
   readonly obs: CreditObservation;
   readonly ltvBps: number;
   readonly flag: CreditFlag;
+  readonly councilNote: string;
 }): ReasoningTraceBody {
-  const { subjectEventId, loan, obs, ltvBps, flag } = args;
+  const { subjectEventId, loan, obs, ltvBps, flag, councilNote } = args;
   const minPrice = Math.min(Number(obs.best_bid), Number(obs.twap_30min));
   const ltvPct = (ltvBps / 100).toFixed(2);
 
-  const rationale =
+  const baseRationale =
     flag === "freeze_request"
       ? `LTV ${ltvPct}% breached the 70% freeze threshold (contract liquidation at ${
           LOAN_INVARIANTS_V0.liquidationThresholdBps / 100
@@ -179,6 +191,7 @@ function buildTraceBody(args: {
       : flag === "watch"
         ? `LTV ${ltvPct}% in watch band [60%, 70%). Notify lenders; voluntary repayment preferred over auction.`
         : `LTV ${ltvPct}% below watch band. No action.`;
+  const rationale = councilNote === "" ? baseRationale : `${baseRationale} ${councilNote}`;
 
   const dissent =
     obs.dispute_30d_count > 0
@@ -219,8 +232,20 @@ async function emitTraceAndTick(args: {
   readonly collateralValueUsdc: bigint;
   readonly flag: CreditFlag;
   readonly genesisId: Sha256Hex;
+  readonly councilSynthesisId: Sha256Hex | null;
+  readonly councilNote: string;
 }): Promise<void> {
-  const { events, loan, obs, ltvBps, collateralValueUsdc, flag, genesisId } = args;
+  const {
+    events,
+    loan,
+    obs,
+    ltvBps,
+    collateralValueUsdc,
+    flag,
+    genesisId,
+    councilSynthesisId,
+    councilNote,
+  } = args;
 
   // Provisional event id placeholder — real id is computed inside the
   // EventSink (canonical-bytes hash). The trace's `subject_event_id`
@@ -233,12 +258,16 @@ async function emitTraceAndTick(args: {
     obs,
     ltvBps,
     flag,
+    councilNote,
   });
+
+  const traceParents: Sha256Hex[] = [genesisId, loan.origination_event_id];
+  if (councilSynthesisId !== null) traceParents.push(councilSynthesisId);
 
   const traceId = await events.emit({
     type: "reasoning.trace",
     body: traceBody,
-    parentIds: [genesisId, loan.origination_event_id],
+    parentIds: traceParents,
   });
 
   const tickBody: CreditTickBody = {
@@ -254,10 +283,17 @@ async function emitTraceAndTick(args: {
     dispute_30d_count: obs.dispute_30d_count,
   };
 
+  const tickParents: Sha256Hex[] = [
+    genesisId,
+    loan.origination_event_id,
+    traceId,
+  ];
+  if (councilSynthesisId !== null) tickParents.push(councilSynthesisId);
+
   await events.emit({
     type: "loop.credit_tick",
     body: tickBody,
-    parentIds: [genesisId, loan.origination_event_id, traceId],
+    parentIds: tickParents,
   });
 }
 
@@ -280,6 +316,52 @@ export function createCreditLoop(args: CreditLoopArgs): ReasoningLoop {
         const obs = await args.observe(loan);
         const { ltvBps, collateralValueUsdc } = computeLtvBps(loan, obs);
         const flag = flagFromLtv(ltvBps);
+
+        // Optional council pass — runs once per loan per cooldown window.
+        // The council's `belief` field is interpreted as loan-health
+        // probability in lender mode (1.0 = safely repaid, 0.0 = will
+        // liquidate). We do NOT mutate the LTV-driven flag here; we
+        // attach the synthesis id to the trace + tick parent chain so
+        // an auditor can walk to the NPC reasoning.
+        let councilSynthesisId: Sha256Hex | null = null;
+        let councilNote = "";
+        if (args.council) {
+          try {
+            const minP = Math.min(
+              Number(obs.best_bid),
+              Number(obs.twap_30min),
+            );
+            const priorHealth = Math.max(0, Math.min(1, 1 - ltvBps / 10_000));
+            const synth = await args.council.run({
+              market_id: asSha256Hex(loan.condition_id),
+              market_question:
+                `Loan ${loan.loan_id.slice(0, 12)} — principal ` +
+                `${loan.principal_usdc} USDC6 against position ${loan.token_id} ` +
+                `on Polymarket condition ${loan.condition_id.slice(0, 12)}; ` +
+                `current LTV ${(ltvBps / 100).toFixed(2)}%; flag=${flag}.`,
+              current_mid: minP,
+              prior_belief: priorHealth,
+              prior_confidence: 0.7,
+              belief_event_id: loan.origination_event_id,
+            });
+            if (synth !== null) {
+              councilSynthesisId = synth.synthesisEventId;
+              councilNote =
+                `Council weighed in (health ` +
+                `${synth.synthesisedBelief.toFixed(2)} conf ` +
+                `${synth.synthesisedConfidence.toFixed(2)}): ` +
+                `${synth.rationale.slice(0, 240)}`;
+            }
+          } catch (err: unknown) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `vanta/credit-loop: council pass for loan ${loan.loan_id} failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+        }
+
         await emitTraceAndTick({
           events: args.ctx.events,
           loan,
@@ -288,6 +370,8 @@ export function createCreditLoop(args: CreditLoopArgs): ReasoningLoop {
           collateralValueUsdc,
           flag,
           genesisId: args.ctx.genesisId,
+          councilSynthesisId,
+          councilNote,
         });
       } catch (err: unknown) {
         // Don't let one bad loan tank the whole tick. The operational

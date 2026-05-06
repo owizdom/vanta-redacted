@@ -12,6 +12,10 @@
     "start": "tsx src/main.ts",
     "smoke": "tsx src/loops/smoke.ts",
     "smoke:onboarding": "tsx src/onboarding/smoke.ts",
+    "smoke:trading": "tsx src/loops/trading-smoke.ts",
+    "smoke:council": "tsx src/loops/council-smoke.ts",
+    "smoke:agents": "tsx src/http/routes/agents-smoke.ts",
+    "smoke:multi-vanta": "tsx src/loops/multi-vanta-smoke.ts",
     "build": "tsc -b",
     "clean": "tsc -b --clean",
     "typecheck": "tsc -b"

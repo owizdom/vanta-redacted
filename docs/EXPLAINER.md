@@ -4,51 +4,85 @@
 
 ## What it is
 
-VANTA is an autonomous agent that lends money to people who own positions on prediction markets like Polymarket. You own a Polymarket position, you don't want to sell it, but you want cash now. VANTA lets you borrow against it.
+VANTA is a **fleet of autonomous lenders** for prediction-market positions. You own a Polymarket bet, you don't want to sell it, but you want cash now — VANTA lends you USDC against it. The agents run by themselves: they read the market, deliberate with an in-world underwriting council, decide whether to lend you the money and at what rate, and run the loan from start to finish. They live inside hardware-secured computers so anyone can verify they're behaving the way they say they are.
 
-The agent runs by itself — no human pressing buttons. It reads the market, decides whether to lend you money and at what rate, and runs the loan from start to finish. It lives inside a hardware-secured computer so anyone can verify it's behaving the way it says it is.
+Three lenders launch on day one, each one a kingdom on a single shared 3D world you can walk through in your browser:
+
+- **vanta-opus** is powered by Claude Opus. Conservative scholar, long horizons, tight haircuts.
+- **vanta-gpt** is powered by GPT-5. High-frequency underwriter, short horizons, tactical.
+- **vanta-gemini** is powered by Gemini 2.5 Pro. Politics-savvy underwriter, policy-shock loans.
+
+You pick which lender to back, or which one to borrow from. Each kingdom underwrites loans on its own thesis with its own council of named townsfolk. You can audit every decision down to the prompt.
 
 ---
 
 ## The problem it solves
 
-Polymarket and similar prediction markets have hundreds of millions of dollars sitting in active positions right now. If you're holding one, you have two choices: wait for the market to resolve (could be months), or sell early at a steep discount.
+Polymarket-style prediction markets have hundreds of millions of dollars sitting in active positions right now. If you're holding one, you have two choices: wait for the market to resolve (could be months) or sell early at a steep discount.
 
-There's no clean way to just *borrow* against your position the way you'd borrow against a house or stocks. Existing crypto lending doesn't handle prediction-market positions well — they're hard to price, the markets keep moving, and traditional risk teams don't understand them.
+There's no clean way to *borrow* against your position the way you'd borrow against a house or stocks. Existing crypto lending doesn't handle prediction-market positions well — they're hard to price, the markets keep moving, and traditional risk teams don't understand them.
 
-VANTA is the agent that fills that gap. It does the analysis, sets the rates, runs the loan book — automatically.
+VANTA fills that gap. It does the analysis, sets the rates, runs the loan book — automatically.
 
 ---
 
-## How it works (the short version)
+## The world
 
-1. **LPs (lenders) deposit USDC** into a vault. They want yield on their stablecoins.
-2. **A borrower** shows up with a Polymarket position and asks for a loan.
-3. **The agent looks at the position** — how liquid is the market, where's the price moving, any disputes, when does it resolve?
-4. **The agent decides** — lend or not, and if yes, at what interest rate.
-5. **If yes**, the borrower gets USDC up front, LPs earn interest, the agent takes a small fee.
-6. **The agent watches the position constantly**. If things go south, it liquidates before LPs lose money.
+VANTA is a **walkable program**. When VANTA loads, hit PLAY and you're standing in a hex-tile fantasy world with three kingdoms ringing a central plaza. Each kingdom is one lender. Above each kingdom floats a glowing ring in the lender's colour — that ring pulses faster when the agent is busy deliberating. Click the ring to open that lender's detail card.
 
-That whole loop runs continuously, with no human in the middle.
+![The plaza with the agent's tower at the centre, watched markets + agents-in-town + runtime events visible on the right — the human-readable layer and the signed event log in one frame.](images/spectate-overview.png)
+
+Around the kingdoms, dozens of named NPCs walk between buildings — these aren't decoration. They are the **underwriting council**. Six NPCs per kingdom, each with a fixed persona and reasoning bias. When you submit a loan request, the agent asks two or three of these townsfolk for their opinion before signing. Brother Tomás the Cloister Scholar cites historical analogues. Helga the Grain Merchant reasons from real-economy stress. Master Konrad the Mint Master reads the curve like a fixed-income trader. Old Bram the Innkeeper is contrarian and gut-driven. Adaeze the Scribe of Songs tracks celebrity arcs. Reza the Cartographer maps districts and demographics. Each persona's voice is in the prompt; each opinion is signed by the TEE; each one shows up in the chat panel verbatim, with their belief number and confidence attached.
+
+The chat panel on the right side of the world is a live feed of every signed event from every kingdom — colour-coded by lender, click any line to expand the full prompt + response + TEE attestation hash. Click the colored dots at the top of the panel to solo or mute a kingdom's channel.
+
+Borrow against your position, lend into a pool, audit a loan denial, watch a council deliberate — all without leaving the world.
+
+---
+
+## How a loan happens (concrete user flow)
+
+**You as borrower.** You own a YES position on a Polymarket question — say, "Will the Fed cut rates in June?" priced at 0.18. You connect your wallet, walk up to vanta-opus's island (or click its ring), and click "borrow against your position."
+
+A modal opens with three steps:
+
+1. **Connect your wallet** — already done.
+2. **Pledge your CTF tokens.** You transfer your YES shares into the agent's `VantaVault` contract on Polygon Amoy. A signed `loan.pledge` event lands on the agent's event log.
+3. **Loan terms.** You enter the condition id, the position id, the principal you want (e.g. $500), and a maturity (e.g. 30 days). Submit.
+
+What you see next, on the right side of the modal, is the council deliberating in real time:
+
+> **Brother Tomás the Cloister Scholar:** "Polymarket book has thinned since the dispute filing — I'd want a wider haircut." (loan-health 0.55, conf 0.7)
+>
+> **Helga the Grain Merchant:** "Maturity is close; if the price doesn't recover this week we're forcing a sale." (loan-health 0.50, conf 0.65)
+>
+> **vanta-opus (council synthesis):** "Tomás flags book thinning, Helga flags maturity pressure. Both credible. Lowering loan-health from 0.65 → 0.52; recommend a 38% haircut and a 200bp rate."
+
+If the council clears the loan, the agent calls `LoanBook.originate(...)` on Base Sepolia, USDC lands in your wallet, and a signed `loan.origination` event is appended. Click the basescan link, view the tx, walk the event chain back to the prompts the agent saw — every layer is auditable.
+
+If the council denies the loan, you see exactly which townsfolk pushed against it and why. Denial *is the product* — verifiable reasoning means knowing the no-vote was honest, not arbitrary.
+
+**You as LP.** Different click. From the agent's detail card, you put $500 into the lender's `LpVault` (an ERC-4626 share token contract). The vault mints you `vLP` shares — say 488 vLP at the current share price of 1.024. You go about your day. The agent originates loans against other people's pledged positions; every origination fee (capped at 5%) and every interest payment at maturity flows into the same pool. Your `vLP` is now worth more USDC. When you want out, click withdraw and the vault redeems your shares at the current share price. If the pool earned 8% over three months, your $500 comes out as ~$540.
+
+It is the Aave aTokens model with one twist: instead of an algorithmic interest curve, the price of every loan was set by a council of in-world characters whose reasoning you can read.
 
 ---
 
 ## How the agent actually thinks
 
-This is the part that makes VANTA different from a regular smart contract.
+Most "AI agents" call an LLM and trust the output. VANTA's whole reasoning trail is **auditable**. Every prompt, every response, every conclusion is hashed, signed by a TEE-resident key, and written to the agent's tamper-proof event log. Anyone can pull up the exact inputs the model saw, the exact response it gave, and the decision the agent made off the back of it.
 
-A smart contract follows fixed rules — *if X then Y*. It can't read a live Polymarket order book and decide "this market looks too thin to lend against right now." That kind of judgment needs intelligence.
+For each loan request the agent runs this chain:
 
-So VANTA actually thinks. For every loan it considers — and every open loan it monitors — the agent runs this loop:
+1. **Read the market.** Pull the live Polymarket book, recent trades, price history, dispute records via `@vanta/mark` and `@vanta/venue-poly`.
+2. **Compute a working haircut.** The `@vanta/haircut` service produces a starting LTV based on the underlying price, time-to-resolution, and dispute density.
+3. **Convene the council.** Sample two or three NPCs from the agent's kingdom roster (deterministic per market + slot so audits replay). For each NPC, call a small model (Anthropic Haiku) with the persona blurb + market context + working LTV. Get back a one-line opinion in the NPC's voice plus a numeric loan-health probability. Each call gets a signed `op.inference` event and a signed `npc.thought` event.
+4. **Synthesise.** Call the agent's primary model with the original LTV math + every NPC vote, ask it to re-evaluate. Get back a final loan-health probability with a one-paragraph rationale citing which townsfolk shifted the agent and why. This is the `council.synthesised` event.
+5. **Sign and write.** The agent's final origination call is parented in the event log on the synthesis, which is parented on the NPC thoughts, which are parented on the inference calls, which are parented on the original `loan.pledge`. Walking the chain reveals the whole reasoning tree.
 
-1. **Read the market.** Pull the live Polymarket book, recent trades, price history, any disputes on record.
-2. **Reason over it.** Call an LLM (Claude, GPT, or Gemini — the agent rotates research roles daily across providers so it isn't pinned to one model's bias; chat-facing roles stay on Claude for voice consistency) with the market data and the borrower's request. The LLM produces a structured judgment: lend or not, at what rate, with what haircut.
-3. **Watch and re-mark.** The credit loop ticks every minute, re-pricing every open loan against the live Polymarket book. If a position drifts too close to the liquidation line, the agent flags it. Separately, a weekly calibration loop replays past loan outcomes to see if the agent's own pricing parameters need tuning — not per-loan monitoring, but long-horizon model fitness.
-4. **Sign the decision.** Every reasoning step — every prompt, every model response, every conclusion — is hashed, signed by the TEE-resident key, and written to the agent's tamper-proof event log.
+The credit loop also re-marks every active loan on a 60-second tick, runs a fresh council pass when the LTV drifts, and emits a signed `loop.credit_tick` carrying the council synthesis if one happened. If a loan crosses the watch threshold (60% LTV), the agent surfaces it; at 70% it issues a freeze request; the on-chain liquidation floor is 77%.
 
-That last step is what nobody else does. Most "AI agents" call an LLM and trust the output. **VANTA's whole reasoning trail is auditable** — anyone can pull up the exact inputs the LLM saw, the exact response it gave, and the decision the agent made off the back of it. If the agent ever lent against a bad position, you can trace exactly why.
-
-And — this is the part that only EigenCloud makes possible — **the agent pays for its own thinking.** The LLM calls aren't billed to me. They're billed to the agent's own EigenCloud account, paid out of the fees the agent earns on loans. Reasoning has a price, and the agent earns enough to cover it. No operator credit card, no API key I have to top up, no human in the funding loop.
+The agent **pays for its own thinking.** LLM calls aren't billed to me — they're billed to the agent's own EigenCloud account, paid out of the fees the agent earns on loans. Reasoning has a price; the agent earns enough to cover it. No operator credit card, no API key I have to top up, no human in the funding loop.
 
 ---
 
@@ -58,52 +92,56 @@ The hardest thing about an agent handling other people's money isn't building it
 
 Smart contracts solved trust for **state** — anyone can read what's stored on chain. But the **decisions** an agent makes happen on a server, off-chain. How do you prove the agent isn't lying about its decisions, isn't rigging the rates, isn't skimming the fees, isn't quietly swapping its own code? You can't, traditionally. You just have to trust the operator. And nobody trusts an operator with their money.
 
-EigenCloud is what closes that gap. It does five things that, together, make an agent like VANTA actually possible — and no other stack delivers all five.
+EigenCloud closes that gap. It does five things that, together, make an agent like VANTA actually possible:
 
-**1. The agent runs in a hardware-secured box.** A TEE (Trusted Execution Environment) on Intel's silicon. Even **I**, the developer, can't see inside while it's running. I can't read the agent's keys, can't peek at borrower data, can't manually override its decisions. The hardware enforces this — not a license agreement, not a promise.
+**1. The agent runs in a hardware-secured box.** A TEE (Trusted Execution Environment) on Intel's silicon. Even *I*, the developer, can't see inside while it's running. I can't read the agent's keys, can't peek at borrower data, can't manually override its decisions. The hardware enforces this — not a license agreement, not a promise.
 
 **2. The agent owns its own wallet — and I don't.** The agent's private key is derived inside the TEE, from a master key held by EigenCloud's KMS, deterministically tied to the agent's identity. The key never leaves the box. Even if my laptop got hacked tomorrow, the agent's funds are safe — because I literally don't have the key. The agent is the only entity that can sign for its own treasury.
 
-**3. The agent pays its own bills — including its own thinking.** Because the agent owns its wallet *and* earns fees, it pays for its own hosting on EigenCloud and its own LLM inference calls out of that revenue. Every time the agent calls Claude or GPT to evaluate a loan, the bill goes against the agent's own EigenCloud account, not mine. There is no operator funnel — nobody is topping the agent up from a bank account, nobody is supplying API keys. It is, in the most literal sense, financially autonomous. **This is the property nobody else's stack delivers** — every other "AI agent" you see is, underneath, a server with a credit card attached to a human.
+**3. The agent pays its own bills — including its own thinking.** Every Anthropic Haiku call for an NPC opinion, every primary-model synthesis, every Polymarket fetch — billed to the agent's own EigenCloud account, paid out of origination fees and interest. **This is the property nobody else's stack delivers** — every other "AI agent" you see is, underneath, a server with a credit card attached to a human.
 
 **4. The running code is provably the public code.** Every release pins the container's image digest on chain. The KMS refuses to give the agent its identity unless the running container's digest matches the on-chain record. So if I tried to silently push a backdoored version, the agent's wallet would simply stop working. Trust is enforced cryptographically, not socially.
 
-**5. Even a fully compromised agent can't drain the system.** On-chain spend cap contracts (`VendorPayment`) bound how much the agent can spend per week. The caps are immutable — set at deploy, can't be changed without a fresh constitutional release. Worst-case, even if everything else fails at once, the damage is bounded by code that nobody — me, an attacker, the agent itself — can mutate.
+**5. Even a fully compromised agent can't drain the system.** On-chain spend cap contracts (`VendorPayment`, one per VANTA) bound how much each agent can spend per week. The caps are immutable — set at deploy, can't be changed without a fresh constitutional release. Worst-case, even if everything else fails at once, the damage is bounded by code that nobody — me, an attacker, the agent itself — can mutate.
 
-The point is: **without EigenCloud, none of this exists.** Without the TEE, the operator can read the keys. Without the KMS-derived wallet, the operator owns the funds. Without the verifiable build chain, the operator can swap the binary. Without the on-chain spend caps, a compromised agent has no upper bound. Without the public verifiability dashboard, users have no way to check any of this without trusting whoever is showing it to them.
-
-A "VANTA" without EigenCloud is just another DeFi protocol with a server somewhere — and we already have plenty of those. **EigenCloud is what turns it from "trust the operator" into "verify the program."** That's not a feature; that's the entire reason the product can exist at all.
+A "VANTA" without EigenCloud is just another DeFi protocol with a server somewhere. **EigenCloud is what turns it from "trust the operator" into "verify the program."**
 
 ---
 
-## What an agent's body looks like
+## The audit chain (proof you can replay)
 
-People hear "AI agent" and picture a chatbot, a backend service, or a smart contract — something incorporeal, a process running on a server somewhere. That mental model misses what an agent actually is once it owns its own keys, earns its own fees, and decides what to do with other people's money. The category has been misread as "software you talk to." It isn't. It's an inhabitant.
+Every signed event in VANTA carries `parent_ids`, so any decision is the root of a tree you can walk backward.
 
-VANTA has a body. You can walk into it.
+Pick any `loan.origination` event. Walk its parents:
 
-![The plaza, with the Wizard's tower at the centre and the runtime panels on the right — the visible layer and the signed event log in one frame.](images/spectate-overview.png)
+```
+loan.origination
+  ↳ council.synthesised   — final loan-health belief + rationale
+       ↳ npc.thought × N — each townsperson's opinion, signed
+            ↳ op.inference × N — the underlying Haiku/Opus call,
+                                   with request hash + response hash
+       ↳ op.inference   — the synthesis call
+  ↳ reasoning.trace      — the agent's haircut math + dissent notes
+  ↳ loan.pledge          — the borrower's CTF escrow event
+```
 
-The agent's reasoning is rendered as a Minecraft world you can spectate from any browser. The Wizard sits at his desk in a stone tower at the centre of a town. Around him: a treasury chest that fills as LPs deposit, a pledge altar where loans originate, a verifier altar that glows when the calibration loop fires, a belfry that rings when the runway runs short. Two ambient townspeople — Sarah the underwriter and Mike, a regular — walk between the landmarks, posting commentary on what they see. Every signed event the agent emits in the runtime — `loop.credit_tick`, `op.treasury_alert`, `loan.origination`, `loop.calibration_proposal` — gets rendered as a physical action: a torch flickers yellow when a loan ticks toward liquidation, a bell rings when treasury crosses an alert threshold, gold particles burst at the desk on every origination.
+Every node has a TEE signature. The signing pubkey is bound to the agent's enclave identity, which is bound to the on-chain image digest. You can pull any of those events from `/api/events/:id`, verify the signature, and replay the reasoning byte-for-byte.
 
-This isn't decoration. **The torch flickering yellow at the pledge altar is the same `loop.credit_tick` that's on the signed event log that's on chain.** The body and the audit trail are the same thing in two presentations — one for humans, one for verifiers.
-
-**Why bodies matter.** An agent without a body has nowhere to be referred to. A user can't point at a server. A counterparty can't address a server. A regulator can't subpoena one. The watchable layer gives the agent a stable place where its decisions are happening, in a form humans can witness — sitting directly on top of the same cryptographic surface that already anchors trust. You can see the wizard. The wizard's actions are signed. The signature chain anchors on chain. Human intuition and machine verification land in the same place.
-
-**Why this opens an on-chain representation.** Smart contracts already give agents a wallet on chain. ERC-8004 (agent identity) ties that wallet to a verifiable program. The Minecraft body ties that wallet to a *presence* — a place the agent "is" that humans can address. The next step is the inverse: visitors pay via x402 micropayments to mint an avatar NFT and walk into the same world the Wizard inhabits, with the avatar serving as their own on-chain ID. That closes the loop: an autonomous program with a wallet, an identity standard, and a body — addressable from any browser, provable from the chain. The agent isn't just a process you trust because the math works. It's an inhabitant of a place you can visit, with an identity that is both visible and verifiable.
+This is what "verifiable AI" actually looks like in production: not a marketing badge, but a tree you can walk.
 
 ---
 
 ## Features
 
-- **LP vault** — deposit USDC, earn yield
-- **Autonomous origination** — the agent underwrites every loan itself
-- **LLM-driven reasoning** — every loan decision is made by an LLM (Claude / GPT / Gemini, with research roles rotating daily across providers and chat-facing roles pinned to Claude for voice consistency) reading live market data, with the prompt and response signed and logged
-- **Real-time marks** — every open loan is re-priced as the underlying market moves
-- **Tamper-proof event log** — every decision the agent makes is signed and queryable
-- **On-chain spend caps** — even if the agent breaks, rules in a smart contract limit how much it can spend each week
-- **Self-funded inference + hosting** — the agent pays for its own LLM calls and EigenCloud hosting from the fees it earns; no operator API keys, no human in the funding loop
-- **Walkable presence** — the agent's reasoning is rendered as a Minecraft world you can spectate from any browser; signed events become torch flickers, bell rings, particle bursts. Sets the stage for x402-paid avatar mint and on-chain visitor identity.
+- **Three live lenders** at launch (vanta-opus, vanta-gpt, vanta-gemini) — each with its own LpVault, LoanBook, VantaVault, VendorPayment
+- **NPC underwriting council** — six named personas per kingdom, real LLM calls, signed `npc.thought` + `council.synthesised` events
+- **ERC-4626 LP shares** — `vLP` tokens that appreciate as origination fees + interest accrue
+- **Real-time loan marks** — every open loan re-priced every 60 seconds against live Polymarket data
+- **Tamper-proof event log** — every prompt, every response, every haircut signed by the TEE
+- **On-chain spend caps** per VANTA — even a fully compromised agent can't drain the system
+- **Self-funded inference + hosting** — agents pay their own bills out of fees, no operator API keys, no human in the funding loop
+- **Walkable presence** — three kingdoms, walking NPCs, clickable rings, live council feed; built on Kenney CC0 hex-tile assets and three.js
+- **Borrower flow** — connect wallet, pledge a Polymarket position, watch the council deliberate, accept the rate or read the denial
 
 ---
 
@@ -111,21 +149,36 @@ This isn't decoration. **The torch flickering yellow at the pledge altar is the 
 
 | Who | Puts in | Gets out |
 |---|---|---|
-| LPs | USDC into the vault | Interest from loans |
-| Borrowers | Polymarket position as collateral | USDC up front, repay on resolution |
-| The agent | Pays its own hosting + AI bills | A small fee on each loan |
+| LPs | USDC into a kingdom's LpVault | `vLP` shares that appreciate from origination fees + interest |
+| Borrowers | A Polymarket CTF position pledged into VantaVault | USDC up front; pay back principal + interest at maturity |
+| The agents | Pay their own EigenCloud + LLM bills | A capped fraction of the origination fee per loan |
 | Me (the dev) | Setup + maintenance | A cut, once VANTA has real users |
 
-Important: **the agent's bills come out of the fees it earns**. There is no operator drain on LP capital. On-chain spend caps make this enforceable, not just promised.
+The agents' bills come out of the fees they earn. There is no operator drain on LP capital. On-chain spend caps make this enforceable, not just promised.
+
+### What a user actually earns (concrete walk-through)
+
+You connect your wallet → click "lend to vanta-opus" → you put in, say, **$500 USDC**. The vault mints you `vLP` share tokens proportional to your deposit (e.g. 488 vLP at a share price of 1.024).
+
+Now you sit and **the agent originates loans against Polymarket positions other people pledge**. Every loan pays:
+
+- An **origination fee** (up to 5% capped on-chain) → goes straight into the pool the moment the loan signs → your `vLP` is now worth more USDC.
+- **Interest at maturity** → goes into the pool → your `vLP` is worth more USDC.
+
+**You earn money by your `vLP` becoming worth more USDC over time.** Same model as Aave's aTokens or any ERC-4626 vault: shares appreciate as the underlying earns yield. The share price `assets/shares` only goes up (modulo liquidations).
+
+When you want out, click withdraw → the vault redeems your `vLP` for the USDC equivalent at the current share price. If you put in $500 and three months later the pool has earned 8% from origination fees + interest, your withdraw returns ~**$540**.
 
 ---
 
 ## Where it is right now
 
-VANTA is **deployed and live on EigenCloud mainnet**. The whole stack is running and queryable today — TEE attestation, signed event log, on-chain lending contracts, immutable spend cap contracts, the public verifiability dashboard. Anyone can hit the dashboard, decode the agent's attestation JWT, and verify the running container against the public source code. The agent is operational; it's now a question of attracting LPs and borrowers to actually use it.
+VANTA is **deployed and live on EigenCloud mainnet**. The whole stack is running and queryable today: TEE attestation, signed event log, the per-kingdom LpVault + LoanBook + VantaVault + VendorPayment contracts, the multi-VANTA registry, the SSE event-stream feed, the three.js fleet world, the borrower flow modal. Anyone can hit the runtime, pull a `loan.origination` by id, and walk the parent chain back through the council to the original NPC prompts.
+
+It's now a question of attracting LPs and borrowers to actually use it.
 
 ---
 
 ## In one line
 
-VANTA is what an autonomous lending firm looks like when the entire firm is one verifiable program running inside a secure box — instead of a building full of analysts.
+VANTA is what an autonomous lending firm looks like when the entire firm is one verifiable program — a fleet of agents, each one a kingdom of named townsfolk who deliberate every loan, every prompt and response signed by the hardware they run on, every decision walkable from a single event id back to the model call that started it.

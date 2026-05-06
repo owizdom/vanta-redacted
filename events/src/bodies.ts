@@ -390,3 +390,204 @@ export interface OpOperationalAnomalyBody {
   readonly detail: string;
   readonly trace_hash: Sha256Hex;
 }
+
+// ----------------------- v3 trading-loop bodies ---------------------------
+//
+// Every v3 body carries `agent_id` so fleet-host consumers can filter the
+// log per-VANTA. agent_id matches AgentRegistry.agentId — sequential from
+// 0, never reused. Probabilities are encoded as centibps (0..1_000_000 →
+// 0%..100% with 4-decimal precision) for beliefs/mids; bps (0..10_000)
+// for confidences and on-chain prices that match contract `uint32`
+// fields. Gap can be signed because the agent's belief may sit above OR
+// below the market mid — `gap_bps` is a signed integer in [-10_000,
+// 10_000].
+
+/**
+ * `trade.decision` — the trading loop's decision event for a single
+ * market in a single tick. Three actions: `enter` (open a new position),
+ * `hold` (no change), `exit` (close an existing position). `side` is
+ * meaningful only for `enter` (and the position's recorded side for
+ * `exit`). `position_id` is the all-zero hex placeholder for `enter`
+ * (the runtime mints it next when calling `PositionBook.open`) and the
+ * existing position id for `hold`/`exit`.
+ *
+ * `trace_hash` pins the paired `reasoning.trace` event; `belief_event_id`
+ * pins the most recent `belief.updated` event the loop consumed when
+ * making this decision (so a verifier can walk back to the LLM call).
+ */
+export interface TradeDecisionBody {
+  readonly agent_id: number;
+  readonly market_id: Sha256Hex;
+  readonly action: "enter" | "hold" | "exit";
+  readonly side: "yes" | "no";
+  readonly size_usdc6: string;
+  readonly belief_centibps: number;
+  readonly confidence_bps: number;
+  readonly mid_centibps: number;
+  readonly gap_bps: number;
+  readonly position_id: Sha256Hex;
+  readonly trace_hash: Sha256Hex;
+  readonly belief_event_id: Sha256Hex;
+}
+
+/**
+ * `trade.executed` — post-image of a confirmed `PositionBook.open(...)`
+ * tx. Field shapes match the on-chain `Position` struct: `size_usdc6` is
+ * the cost basis, `entry_price_bps` is uint32 in [1, 9999] (matches the
+ * contract's strict-inequality bounds — neither 0 nor 1.0 is a sensible
+ * binary entry price). `tx_hash` and `block_number` cite the chain
+ * record; `attestation_hash` is the off-chain decision-event commitment.
+ */
+export interface TradeExecutedBody {
+  readonly agent_id: number;
+  readonly position_id: Sha256Hex;
+  readonly market_id: Sha256Hex;
+  readonly side: "yes" | "no";
+  readonly size_usdc6: string;
+  readonly entry_price_bps: number;
+  readonly tx_hash: Sha256Hex;
+  readonly block_number: number;
+  readonly block_hash: Sha256Hex;
+  readonly attestation_hash: Sha256Hex;
+}
+
+/**
+ * `trade.closed` — post-image of a confirmed `PositionBook.close(...)`
+ * tx. `pnl_usdc6` is signed (the agent can lose more than nothing —
+ * USDC is non-negative on chain but the realised PnL may be negative;
+ * carried as a decimal string with optional leading `-`). `holding_seconds`
+ * is `closed_at - opened_at` from the contract's recorded timestamps.
+ */
+export interface TradeClosedBody {
+  readonly agent_id: number;
+  readonly position_id: Sha256Hex;
+  readonly exit_price_bps: number;
+  readonly proceeds_usdc6: string;
+  readonly cost_basis_usdc6: string;
+  readonly pnl_usdc6: string;
+  readonly holding_seconds: number;
+  readonly tx_hash: Sha256Hex;
+  readonly block_number: number;
+  readonly block_hash: Sha256Hex;
+  readonly attestation_hash: Sha256Hex;
+}
+
+/**
+ * `pool.deposit` — confirmed ERC-4626 deposit into an `AgentPoolVault`.
+ * `share_price_usdc6_per_share_e18` is the share price at deposit
+ * scaled to 1e18 (so a price of 1.0 USDC/share is `10**18`); this keeps
+ * the field a non-negative integer string instead of a fraction.
+ */
+export interface PoolDepositBody {
+  readonly agent_id: number;
+  readonly depositor_addr: EthAddressHex;
+  readonly usdc6_amount: string;
+  readonly shares_minted: string;
+  readonly share_price_usdc6_per_share_e18: string;
+  readonly tx_hash: Sha256Hex;
+  readonly block_number: number;
+}
+
+/**
+ * `pool.withdraw` — confirmed ERC-4626 redeem from an `AgentPoolVault`.
+ */
+export interface PoolWithdrawBody {
+  readonly agent_id: number;
+  readonly withdrawer_addr: EthAddressHex;
+  readonly shares_redeemed: string;
+  readonly usdc6_returned: string;
+  readonly share_price_usdc6_per_share_e18: string;
+  readonly tx_hash: Sha256Hex;
+  readonly block_number: number;
+}
+
+/**
+ * `belief.updated` — agent's structured-output belief about a single
+ * market, signed at the moment the belief is computed (not when the
+ * trade executes). `inference_event_id` pins the `op.inference` event
+ * that produced the belief (so a verifier can walk back to the LLM
+ * prompt/response). `mid_centibps` is the market mid the loop saw in
+ * the same tick — signed `gap_bps` is a derived field, retained on
+ * the event so consumers don't need both events to compute the mismatch.
+ */
+export interface BeliefUpdatedBody {
+  readonly agent_id: number;
+  readonly market_id: Sha256Hex;
+  readonly belief_centibps: number;
+  readonly confidence_bps: number;
+  readonly mid_centibps: number;
+  readonly gap_bps: number;
+  readonly inference_event_id: Sha256Hex;
+}
+
+/**
+ * `visitor.island_entered` — emitted by the bridge plugin when a
+ * Minecraft visitor steps onto an island's interact pad. The runtime
+ * uses this to scope subsequent `/back N` or `/deposit N` chat-bridge
+ * commands to that VANTA's pool. `visitor_handle` is the Bukkit player
+ * name; `world_name` distinguishes overworld / nether / custom.
+ */
+export interface VisitorIslandEnteredBody {
+  readonly agent_id: number;
+  readonly visitor_handle: string;
+  readonly world_name: string;
+  readonly position_x: number;
+  readonly position_y: number;
+  readonly position_z: number;
+}
+
+/**
+ * `npc.thought` — one signed opinion from a single in-world NPC about
+ * a market the agent is currently watching. Each NPC has a fixed
+ * deterministic identity (`npc_id`) and a persona that biases its
+ * reasoning style (a Cloister Scholar cites history, a Grain Merchant
+ * speaks in real-economy terms, etc).
+ *
+ * Council step: every ~90s per (agent, market) the runtime samples
+ * 2-3 NPCs from the agent's kingdom and asks each via a cheap
+ * Anthropic-Haiku inference call for `(belief, confidence, thought)`
+ * grounded in their persona. Each NPC's response becomes one signed
+ * `npc.thought` event with parent_ids pointing at the underlying
+ * `op.inference` and the `belief.updated` for the same market.
+ *
+ * The thought string is short (≤ 280 chars, twitter-ish) so the
+ * frontend can render it inline in the chat panel without expanding.
+ */
+export interface NpcThoughtBody {
+  readonly agent_id: number;
+  readonly npc_id: string;
+  readonly npc_persona: string;
+  readonly npc_display_name: string;
+  readonly market_id: Sha256Hex;
+  readonly thought: string;
+  readonly belief_centibps: number;
+  readonly confidence_bps: number;
+  readonly inference_event_id: Sha256Hex;
+}
+
+/**
+ * `council.synthesised` — emitted when the agent has weighed N recent
+ * `npc.thought` events for a market and produced a re-evaluated
+ * belief. `npc_thought_event_ids` enumerates the exact thoughts that
+ * were consumed, giving the audit trail "this belief move came from
+ * these citizens." `prior_belief_centibps` is the belief BEFORE the
+ * synthesis (from `belief.updated`); `synthesised_belief_centibps` is
+ * the belief AFTER. The trading loop then uses the synthesised value
+ * for its decide step.
+ *
+ * `rationale` is the agent's free-text explanation, capped at 4096
+ * chars to match `reasoning.trace`. Auditors can replay the chain by
+ * walking the parent_ids: synthesis → thoughts → underlying inference
+ * calls → original belief.updated.
+ */
+export interface CouncilSynthesisedBody {
+  readonly agent_id: number;
+  readonly market_id: Sha256Hex;
+  readonly npc_thought_event_ids: readonly Sha256Hex[];
+  readonly prior_belief_centibps: number;
+  readonly synthesised_belief_centibps: number;
+  readonly delta_centibps: number;
+  readonly synthesised_confidence_bps: number;
+  readonly rationale: string;
+  readonly inference_event_id: Sha256Hex;
+}

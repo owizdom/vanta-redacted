@@ -49,6 +49,20 @@ import { registerServiceRoutes } from "./http/routes/services.js";
 import { registerStateRoute } from "./http/routes/state.js";
 import { registerDevProbeRoute } from "./http/routes/dev-probe.js";
 import { registerBridgeRoutes } from "./http/routes/bridge.js";
+import { registerAgentsRoutes } from "./http/routes/agents.js";
+import {
+  createFixtureRegistryReader,
+  DEFAULT_FIXTURE_AGENTS,
+} from "./services/agent-registry-reader.js";
+import {
+  createFixturePoolReader,
+  type PoolReader,
+} from "./services/pool-reader.js";
+import { createFleetHost, type FleetHost } from "./services/fleet-host.js";
+import {
+  adaptInferenceClient,
+  type CouncilInferenceFn,
+} from "./services/npc-council.js";
 import { createCreditObserver } from "./services/credit-observer.js";
 import { createExposureReader } from "./services/exposure-reader.js";
 import { createMarkLoop } from "./services/mark-loop.js";
@@ -198,6 +212,33 @@ async function startMain(): Promise<void> {
   await registerMarketsRoutes(app, { marketsCache: boot.marketsCache });
   await registerHealthRoute(app, { bootstrap: boot });
   await registerDevProbeRoute(app);
+
+  // v3 multi-VANTA marketplace surface. The fixture reader seeds three
+  // islands so the marketplace UI renders before any on-chain
+  // registration happens; viem-backed readers replace this when the
+  // AgentRegistry is deployed and `V3_REGISTRY_ADDRESS` is set in env.
+  const v3Registry = createFixtureRegistryReader(DEFAULT_FIXTURE_AGENTS);
+  const v3PoolReaders = new Map<number, PoolReader>();
+  for (const agent of DEFAULT_FIXTURE_AGENTS) {
+    v3PoolReaders.set(
+      agent.agent_id,
+      createFixturePoolReader({
+        agent_id: agent.agent_id,
+        pool: agent.pool,
+        position_book: agent.position_book,
+        nav_usdc6: 0n,
+        total_supply: 0n,
+        max_aum_usdc6: 10_000_000_000n,
+        open_notional_usdc6: 0n,
+        lifetime_cost_basis_usdc6: 0n,
+        lifetime_proceeds_usdc6: 0n,
+      }),
+    );
+  }
+  await registerAgentsRoutes(app, {
+    registry: v3Registry,
+    poolReaders: v3PoolReaders,
+  });
   if (config.watchableEnabled) {
     await registerBridgeRoutes(app);
     app.log.info("watchable: bridge routes registered (WATCHABLE_ENABLED=1)");
@@ -443,12 +484,46 @@ async function startMain(): Promise<void> {
     app.log.info({ loop: loop.name }, "reasoning_loop_started");
   }
 
+  // ----- Fleet host: per-VANTA lender credit loop with NPC council ------
+  // For each registered VANTA, spawn its own credit loop (lender mode)
+  // with an NPC council deliberating each tick. agent_id=0 is the
+  // "VANTA-zero" agent — we let the existing v2 creditLoop handle its
+  // boot.loanRegistry, so the fleet host's loansFor(0) returns []
+  // (avoids duplicate ticks). Per-agent registries land in v3.5 prod
+  // wiring; until then, agents 1+ also produce empty loan lists.
+  const fleetCouncilInferenceFor = (
+    agentId: number,
+  ): CouncilInferenceFn | null => {
+    return adaptInferenceClient({
+      client: boot.inference,
+      defaultParentId: boot.genesis.id,
+      npcBotHandle: `vanta-${String(agentId)}-npc`,
+    });
+  };
+  const fleetObserve = createCreditObserver({ marketsCache: boot.marketsCache });
+  const fleetHost: FleetHost = createFleetHost({
+    registry: v3Registry,
+    ctx,
+    loansFor: async () => [],
+    observeFor: (_agentId, loan) => fleetObserve(loan),
+    councilInferenceFor: fleetCouncilInferenceFor,
+    tickSeconds: 60,
+  });
+  await fleetHost.start();
+  for (const { agent_id } of fleetHost.loops()) {
+    app.log.info(
+      { fleet_loop: `credit-${String(agent_id)}` },
+      "fleet_loop_started",
+    );
+  }
+
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`vanta/runtime: received ${signal}, draining…`);
     try {
       boot.agentState.stop();
       boot.marketsCache.stop();
       await Promise.all(reasoningLoops.map((l) => l.stop()));
+      await fleetHost.stop();
       await markLoop.stop();
       await app.close();
     } catch (err: unknown) {

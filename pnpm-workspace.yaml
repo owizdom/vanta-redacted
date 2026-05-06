@@ -12,5 +12,6 @@ packages:
   - "runtime"
   - "scripts"
   - "web"
+  - "game"
   - "npcs"
   - "viewer"

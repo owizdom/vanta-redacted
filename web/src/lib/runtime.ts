@@ -124,3 +124,79 @@ export async function fetchHealth(): Promise<{ ok: boolean }> {
     return { ok: false };
   }
 }
+
+// ---------------------- v3 multi-VANTA marketplace ----------------------
+
+export interface V3AgentSummary {
+  readonly agent_id: number;
+  readonly name: string;
+  readonly thesis: string;
+  readonly color_rgb: number;
+  readonly color_hex: string;
+  readonly pool: string;
+  readonly position_book: string;
+  readonly op_cap: string;
+  readonly operator: string;
+  readonly registered_at_unix: number;
+  readonly paused: boolean;
+}
+
+export interface V3AgentRecord extends V3AgentSummary {
+  readonly image_digest: string;
+  readonly attestation_hash: string;
+  readonly island_offset: { readonly x: number; readonly z: number };
+}
+
+export interface V3PoolState {
+  readonly agent_id: number;
+  readonly pool: string;
+  readonly position_book: string;
+  readonly nav_usdc6: string;
+  readonly total_supply: string;
+  readonly share_price_e18: string;
+  readonly max_aum_usdc6: string;
+  readonly free_usdc6: string;
+  readonly open_notional_usdc6: string;
+  readonly lifetime_cost_basis_usdc6: string;
+  readonly lifetime_proceeds_usdc6: string;
+  readonly realised_pnl_usdc6: string;
+}
+
+export async function fetchAgents(): Promise<readonly V3AgentSummary[]> {
+  const r = await getJson<{ agents?: V3AgentSummary[] }>("/agents");
+  return r.agents ?? [];
+}
+
+export async function fetchAgent(agentId: number): Promise<V3AgentRecord | null> {
+  try {
+    return await getJson<V3AgentRecord>(`/agents/${String(agentId)}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchPoolState(agentId: number): Promise<V3PoolState | null> {
+  try {
+    return await getJson<V3PoolState>(`/pool/${String(agentId)}/state`);
+  } catch {
+    return null;
+  }
+}
+
+/** Format USDC wei (6 decimals) into a human display ($1.23k). */
+export function formatUsdc6(rawStr: string): string {
+  const raw = BigInt(rawStr);
+  const whole = Number(raw / 1_000_000n);
+  if (whole === 0 && raw === 0n) return "$0";
+  if (whole >= 1_000_000) return `$${(whole / 1_000_000).toFixed(2)}M`;
+  if (whole >= 10_000) return `$${(whole / 1000).toFixed(0)}k`;
+  if (whole >= 1_000) return `$${(whole / 1000).toFixed(1)}k`;
+  return `$${whole.toLocaleString("en-US")}`;
+}
+
+/** Format signed USDC wei (allows leading `-`). */
+export function formatSignedUsdc6(rawStr: string): string {
+  const negative = rawStr.startsWith("-");
+  const formatted = formatUsdc6(negative ? rawStr.slice(1) : rawStr);
+  return negative ? `-${formatted}` : formatted;
+}

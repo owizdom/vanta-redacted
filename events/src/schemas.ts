@@ -533,6 +533,222 @@ const opOperationalAnomalyBodySchema = z
   })
   .strict();
 
+// ----------------------- v3 trading-loop body schemas ---------------------
+//
+// Probabilities and prices in v3 use two units:
+//   - centibps: 0..1_000_000 → 0%..100% with 4 decimal places of
+//     precision. Used for `belief_centibps` and `mid_centibps`.
+//   - bps: 0..10_000 → 0%..100% with 2 decimal places. Used for
+//     `confidence_bps` and on-chain prices that match the contract's
+//     `uint32 priceBps` fields. `entry_price_bps` is strictly bounded
+//     to [1, 9999] (mirrors the contract's PriceOutOfRange revert).
+//   - `gap_bps`: signed integer in [-10_000, 10_000]. Negative when the
+//     agent's belief sits below the market mid.
+//
+// `agent_id` is `nonNegativeInteger` everywhere — AgentRegistry assigns
+// agent ids sequentially from 0 and never reuses them, so the wire
+// shape is the same as a `count` field.
+
+const BELIEF_CENTIBPS_MAX = 1_000_000;
+const PROB_BPS_MAX = 10_000;
+const ENTRY_PRICE_BPS_MIN = 1;
+const ENTRY_PRICE_BPS_MAX = 9_999;
+const GAP_BPS_MIN = -10_000;
+const GAP_BPS_MAX = 10_000;
+
+const beliefCentibpsField = nonNegativeInteger.refine(
+  (n) => n <= BELIEF_CENTIBPS_MAX,
+  {
+    message: `belief_centibps must be in [0, ${String(BELIEF_CENTIBPS_MAX)}]`,
+  },
+);
+
+const probBpsField = nonNegativeInteger.refine((n) => n <= PROB_BPS_MAX, {
+  message: `confidence_bps must be in [0, ${String(PROB_BPS_MAX)}]`,
+});
+
+const gapBpsField = integerNumber.refine(
+  (n) => n >= GAP_BPS_MIN && n <= GAP_BPS_MAX,
+  {
+    message: `gap_bps must be in [${String(GAP_BPS_MIN)}, ${String(GAP_BPS_MAX)}]`,
+  },
+);
+
+const entryPriceBpsField = nonNegativeInteger.refine(
+  (n) => n >= ENTRY_PRICE_BPS_MIN && n <= ENTRY_PRICE_BPS_MAX,
+  {
+    message: `entry_price_bps must be in [${String(ENTRY_PRICE_BPS_MIN)}, ${String(ENTRY_PRICE_BPS_MAX)}]`,
+  },
+);
+
+const exitPriceBpsField = nonNegativeInteger.refine(
+  (n) => n <= PROB_BPS_MAX,
+  { message: `exit_price_bps must be in [0, ${String(PROB_BPS_MAX)}]` },
+);
+
+const tradeSideEnum = z.enum(["yes", "no"]);
+
+/** Signed decimal-digit string: optional leading `-`, then digits. */
+const SIGNED_DECIMAL_STR = /^-?\d+$/;
+const signedAmountStr = z
+  .string()
+  .regex(SIGNED_DECIMAL_STR, "must be a (possibly signed) decimal-digit string");
+
+const tradeDecisionBodySchema = z
+  .object({
+    agent_id: nonNegativeInteger,
+    market_id: hex64,
+    action: z.enum(["enter", "hold", "exit"]),
+    side: tradeSideEnum,
+    size_usdc6: amountStr,
+    belief_centibps: beliefCentibpsField,
+    confidence_bps: probBpsField,
+    mid_centibps: beliefCentibpsField,
+    gap_bps: gapBpsField,
+    position_id: hex64,
+    trace_hash: hex64,
+    belief_event_id: hex64,
+  })
+  .strict();
+
+const tradeExecutedBodySchema = z
+  .object({
+    agent_id: nonNegativeInteger,
+    position_id: hex64,
+    market_id: hex64,
+    side: tradeSideEnum,
+    size_usdc6: amountStr,
+    entry_price_bps: entryPriceBpsField,
+    tx_hash: hex64,
+    block_number: positiveInteger,
+    block_hash: hex64,
+    attestation_hash: hex64,
+  })
+  .strict();
+
+const tradeClosedBodySchema = z
+  .object({
+    agent_id: nonNegativeInteger,
+    position_id: hex64,
+    exit_price_bps: exitPriceBpsField,
+    proceeds_usdc6: amountStr,
+    cost_basis_usdc6: amountStr,
+    pnl_usdc6: signedAmountStr,
+    holding_seconds: nonNegativeInteger,
+    tx_hash: hex64,
+    block_number: positiveInteger,
+    block_hash: hex64,
+    attestation_hash: hex64,
+  })
+  .strict();
+
+const poolDepositBodySchema = z
+  .object({
+    agent_id: nonNegativeInteger,
+    depositor_addr: ethAddr,
+    usdc6_amount: amountStr,
+    shares_minted: amountStr,
+    share_price_usdc6_per_share_e18: amountStr,
+    tx_hash: hex64,
+    block_number: positiveInteger,
+  })
+  .strict();
+
+const poolWithdrawBodySchema = z
+  .object({
+    agent_id: nonNegativeInteger,
+    withdrawer_addr: ethAddr,
+    shares_redeemed: amountStr,
+    usdc6_returned: amountStr,
+    share_price_usdc6_per_share_e18: amountStr,
+    tx_hash: hex64,
+    block_number: positiveInteger,
+  })
+  .strict();
+
+const beliefUpdatedBodySchema = z
+  .object({
+    agent_id: nonNegativeInteger,
+    market_id: hex64,
+    belief_centibps: beliefCentibpsField,
+    confidence_bps: probBpsField,
+    mid_centibps: beliefCentibpsField,
+    gap_bps: gapBpsField,
+    inference_event_id: hex64,
+  })
+  .strict();
+
+/** Bukkit player-name grammar: 3-16 chars, alnum + underscore. */
+const VISITOR_HANDLE_RE = /^[A-Za-z0-9_]{3,16}$/;
+
+const visitorIslandEnteredBodySchema = z
+  .object({
+    agent_id: nonNegativeInteger,
+    visitor_handle: z
+      .string()
+      .regex(
+        VISITOR_HANDLE_RE,
+        "visitor_handle must be 3-16 chars of [A-Za-z0-9_] (Bukkit grammar)",
+      ),
+    world_name: z.string().min(1).max(64),
+    position_x: integerNumber,
+    position_y: integerNumber,
+    position_z: integerNumber,
+  })
+  .strict();
+
+/**
+ * NPC id grammar: `<kingdom>.<persona-slug>.<index>` — e.g.
+ * `vanta-opus.cloister-scholar.1`. Lowercase alpha + dots + dashes
+ * + digits, 4..64 chars. Stable per-boot so audit chains stay readable.
+ */
+const NPC_ID_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9-]*){2}$/;
+const npcIdField = z
+  .string()
+  .min(4)
+  .max(64)
+  .regex(
+    NPC_ID_RE,
+    "npc_id must match <kingdom>.<persona-slug>.<index> (lowercase, dot-separated)",
+  );
+
+const npcThoughtBodySchema = z
+  .object({
+    agent_id: nonNegativeInteger,
+    npc_id: npcIdField,
+    npc_persona: z.string().min(1).max(64),
+    npc_display_name: z.string().min(1).max(64),
+    market_id: hex64,
+    thought: z.string().min(1).max(280),
+    belief_centibps: beliefCentibpsField,
+    confidence_bps: probBpsField,
+    inference_event_id: hex64,
+  })
+  .strict();
+
+const councilSynthesisedBodySchema = z
+  .object({
+    agent_id: nonNegativeInteger,
+    market_id: hex64,
+    npc_thought_event_ids: z.array(hex64).min(1).max(8).readonly(),
+    prior_belief_centibps: beliefCentibpsField,
+    synthesised_belief_centibps: beliefCentibpsField,
+    delta_centibps: gapBpsField,
+    synthesised_confidence_bps: probBpsField,
+    rationale: z.string().min(1).max(4096),
+    inference_event_id: hex64,
+  })
+  .strict()
+  .refine(
+    (b) =>
+      b.delta_centibps ===
+      b.synthesised_belief_centibps - b.prior_belief_centibps,
+    {
+      message:
+        "council.synthesised: delta_centibps must equal synthesised_belief_centibps - prior_belief_centibps",
+    },
+  );
+
 /** Body-schema registry, keyed by discriminator (spec §D12 correspondence). */
 export const bodySchemas = {
   "tee.attestation": teeAttestationBodySchema,
@@ -555,6 +771,15 @@ export const bodySchemas = {
   "loop.onboard_decision": loopOnboardDecisionBodySchema,
   "op.treasury_alert": opTreasuryAlertBodySchema,
   "op.operational_anomaly": opOperationalAnomalyBodySchema,
+  "trade.decision": tradeDecisionBodySchema,
+  "trade.executed": tradeExecutedBodySchema,
+  "trade.closed": tradeClosedBodySchema,
+  "pool.deposit": poolDepositBodySchema,
+  "pool.withdraw": poolWithdrawBodySchema,
+  "belief.updated": beliefUpdatedBodySchema,
+  "visitor.island_entered": visitorIslandEnteredBodySchema,
+  "npc.thought": npcThoughtBodySchema,
+  "council.synthesised": councilSynthesisedBodySchema,
 } as const;
 
 // ------------------- Envelope schemas -------------------
@@ -679,6 +904,15 @@ export const envelopePermissiveSchema = z
     buildVariantPermissive("loop.onboard_decision"),
     buildVariantPermissive("op.treasury_alert"),
     buildVariantPermissive("op.operational_anomaly"),
+    buildVariantPermissive("trade.decision"),
+    buildVariantPermissive("trade.executed"),
+    buildVariantPermissive("trade.closed"),
+    buildVariantPermissive("pool.deposit"),
+    buildVariantPermissive("pool.withdraw"),
+    buildVariantPermissive("belief.updated"),
+    buildVariantPermissive("visitor.island_entered"),
+    buildVariantPermissive("npc.thought"),
+    buildVariantPermissive("council.synthesised"),
   ])
   .refine(
     (ev) => enforceGenesisParentShape(ev.type, ev.parent_ids.length),
@@ -710,6 +944,15 @@ export const envelopeStrictSchema = z
     buildVariantStrict("loop.onboard_decision"),
     buildVariantStrict("op.treasury_alert"),
     buildVariantStrict("op.operational_anomaly"),
+    buildVariantStrict("trade.decision"),
+    buildVariantStrict("trade.executed"),
+    buildVariantStrict("trade.closed"),
+    buildVariantStrict("pool.deposit"),
+    buildVariantStrict("pool.withdraw"),
+    buildVariantStrict("belief.updated"),
+    buildVariantStrict("visitor.island_entered"),
+    buildVariantStrict("npc.thought"),
+    buildVariantStrict("council.synthesised"),
   ])
   .refine(
     (ev) => enforceGenesisParentShape(ev.type, ev.parent_ids.length),

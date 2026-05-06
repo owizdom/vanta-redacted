@@ -20,6 +20,7 @@ export { asSha256HexOrEmpty } from "./types.js";
 // Body interfaces
 export type {
   ConstitutionalGenesisBody,
+  CouncilSynthesisedBody,
   EthAddressHex,
   LoanLiquidationBody,
   LoanMarkBody,
@@ -31,6 +32,7 @@ export type {
   LoopCalibrationProposalBody,
   LoopCreditTickBody,
   LoopOnboardDecisionBody,
+  NpcThoughtBody,
   OpInferenceBody,
   OpMarkGapBody,
   OpMarkSparseBody,
