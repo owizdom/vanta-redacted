@@ -722,8 +722,8 @@ export async function bootstrap(config: RuntimeConfig): Promise<Bootstrap> {
   }
   // Step 6: viem clients + on-chain owner check (I-RT-2).
   const baseSepoliaLocal = defineChain({
-    id: 84532,
-    name: "base-sepolia-local",
+    id: config.loanBookChainId,
+    name: config.loanBookChainId === 8453 ? "base-mainnet" : "base-sepolia-local",
     nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
     rpcUrls: {
       default: { http: [config.loanBookRpcUrl] },

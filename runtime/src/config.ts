@@ -25,10 +25,19 @@ const RawConfig = z.object({
     .string()
     .url()
     .default("http://127.0.0.1:8545"),
+  /** Chain id for the LpVault / LoanBook chain. 84532=Base Sepolia, 8453=Base mainnet. */
+  LOAN_BOOK_CHAIN_ID: z.coerce.number().int().positive().default(84532),
   AMOY_RPC_URL: z
     .string()
     .url()
     .default("http://127.0.0.1:8546"),
+  /** Chain id for the VantaVault chain. 80002=Polygon Amoy, 137=Polygon mainnet. */
+  AMOY_CHAIN_ID: z.coerce.number().int().positive().default(80002),
+  /** When 1, exposes /api/admin/deploy + /api/admin/send-tx for one-shot
+   *  contract deploys signed by the in-TEE admin wallet. MUST go back to 0
+   *  after the initial deploy is complete — leaving it on lets anyone with
+   *  network access broadcast txs from the admin EOA. */
+  VANTA_DEPLOY_ADMIN_ENABLED: z.coerce.boolean().default(false),
   LOAN_BOOK_ADDRESS: z
     .string()
     .regex(ETH_ADDR, "must be a 0x-prefixed 20-byte hex address")
@@ -250,7 +259,10 @@ export interface RuntimeConfig {
   readonly host: string;
   readonly dataDir: string;
   readonly loanBookRpcUrl: string;
+  readonly loanBookChainId: number;
   readonly amoyRpcUrl: string;
+  readonly amoyChainId: number;
+  readonly deployAdminEnabled: boolean;
   readonly loanBookAddress: `0x${string}`;
   readonly lpVaultAddress: `0x${string}`;
   readonly expectedAdmin: `0x${string}` | null;
@@ -347,7 +359,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     host: raw.HOST,
     dataDir: resolve(raw.VANTA_DATA_DIR),
     loanBookRpcUrl: raw.LOAN_BOOK_RPC_URL,
+    loanBookChainId: raw.LOAN_BOOK_CHAIN_ID,
     amoyRpcUrl: raw.AMOY_RPC_URL,
+    amoyChainId: raw.AMOY_CHAIN_ID,
+    deployAdminEnabled: raw.VANTA_DEPLOY_ADMIN_ENABLED,
     loanBookAddress: loanBookAddress as `0x${string}`,
     lpVaultAddress: lpVaultAddress as `0x${string}`,
     expectedAdmin: expectedAdmin === undefined ? null : (expectedAdmin as `0x${string}`),

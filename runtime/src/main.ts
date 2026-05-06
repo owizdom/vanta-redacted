@@ -49,6 +49,7 @@ import { registerMarketsRoutes } from "./http/routes/markets.js";
 import { registerServiceRoutes } from "./http/routes/services.js";
 import { registerStateRoute } from "./http/routes/state.js";
 import { registerDevProbeRoute } from "./http/routes/dev-probe.js";
+import { registerAdminDeployRoutes } from "./http/routes/admin-deploy.js";
 import { registerBridgeRoutes } from "./http/routes/bridge.js";
 import { registerAgentsRoutes } from "./http/routes/agents.js";
 import {
@@ -273,6 +274,11 @@ async function startMain(): Promise<void> {
   await registerMarketsRoutes(app, { marketsCache: boot.marketsCache });
   await registerHealthRoute(app, { bootstrap: boot });
   await registerDevProbeRoute(app, { inference: boot.inference });
+  await registerAdminDeployRoutes(app, {
+    enabled: config.deployAdminEnabled,
+    walletClient: boot.walletClient,
+    publicClient: boot.publicClient,
+  });
 
   // v3 multi-VANTA marketplace surface. The fixture reader seeds three
   // islands so the marketplace UI renders before any on-chain
