@@ -29,8 +29,10 @@ import { createHash } from "node:crypto";
 import { AttestClient } from "@layr-labs/ecloud-sdk/attest";
 import type { FastifyInstance } from "fastify";
 
+import type { InferenceClient, InferenceProvider } from "../../services/inference.js";
+
 const DEFAULT_PROBE_PATH = "/v1/models";
-const RESPONSE_EXCERPT_BYTES = 1024;
+const RESPONSE_EXCERPT_BYTES = 8192;
 
 interface DecodedJwt {
   readonly header: Record<string, unknown>;
@@ -67,7 +69,76 @@ function isProbeEnabled(): boolean {
   return process.env["VANTA_DEV_PROBE_ENABLED"] === "1";
 }
 
-export async function registerDevProbeRoute(app: FastifyInstance): Promise<void> {
+export interface DevProbeOpts {
+  readonly inference?: InferenceClient;
+}
+
+export async function registerDevProbeRoute(
+  app: FastifyInstance,
+  opts: DevProbeOpts = {},
+): Promise<void> {
+  // /api/dev/probe-inference?provider=anthropic|openai|google
+  // Forces a specific provider via providerHint and returns the raw
+  // response text + latency + provider/model used. Useful for confirming
+  // each lane works end-to-end on the gateway.
+  app.get("/api/dev/probe-inference", async (req, reply) => {
+    if (!isProbeEnabled()) {
+      void reply.code(404);
+      return { error: "not_found" };
+    }
+    if (opts.inference === undefined) {
+      void reply.code(503);
+      return { error: "inference_client_not_wired" };
+    }
+    const q = req.query as Record<string, string | undefined>;
+    const provHint = q["provider"];
+    const validHint =
+      provHint === "anthropic" || provHint === "openai" || provHint === "google"
+        ? (provHint as InferenceProvider)
+        : undefined;
+    const promptText =
+      q["prompt"] ??
+      "Respond with the single word OK (no punctuation, no quotes).";
+
+    const t0 = Date.now();
+    try {
+      const baseReq = {
+        role: "researcher" as const,
+        system: "You are a connectivity probe. Respond with exactly what the user asks for, nothing else.",
+        messages: [{ role: "user" as const, content: promptText }],
+        maxTokens: 16,
+        temperature: 0,
+      };
+      const r = await opts.inference.call(
+        validHint === undefined ? baseReq : { ...baseReq, providerHint: validHint },
+      );
+      return {
+        ok: true,
+        provider: r.provider,
+        model: r.model,
+        text: r.text,
+        latency_ms: r.latencyMs,
+        prompt_tokens: r.promptTokens,
+        completion_tokens: r.completionTokens,
+        wall_ms: Date.now() - t0,
+      };
+    } catch (err: unknown) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      const meta =
+        typeof (err as { meta?: unknown })?.meta === "object"
+          ? (err as { meta?: Record<string, string> }).meta
+          : undefined;
+      void reply.code(500);
+      return {
+        ok: false,
+        error: e.message,
+        code: (err as { code?: string })?.code ?? null,
+        meta: meta ?? null,
+        wall_ms: Date.now() - t0,
+      };
+    }
+  });
+
   app.get("/api/dev/probe-eigen", async (req, reply) => {
     if (!isProbeEnabled()) {
       void reply.code(404);

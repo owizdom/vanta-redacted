@@ -87,7 +87,12 @@ export function createGatewayJudge(args: {
       system:
         "You score market resolution-criteria text for clarity. Respond with a single integer in 0..100 and nothing else.",
       messages: [{ role: "user", content: filled }],
-      maxTokens: 8,
+      // 32 tokens (was 8) so reasoning-mode providers like Gemini 2.5
+      // Pro that spend internal tokens on hidden chain-of-thought still
+      // have headroom for the visible integer. The strict-parse regex
+      // below caps interpretation, so a longer response can't smuggle
+      // a wrong score. Knob change only — prompt bytes unchanged.
+      maxTokens: 32,
       temperature: 0,
     });
     const score = parseScoreOrThrow(out.text);

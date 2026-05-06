@@ -272,7 +272,7 @@ async function startMain(): Promise<void> {
   await registerSettleRoute(app);
   await registerMarketsRoutes(app, { marketsCache: boot.marketsCache });
   await registerHealthRoute(app, { bootstrap: boot });
-  await registerDevProbeRoute(app);
+  await registerDevProbeRoute(app, { inference: boot.inference });
 
   // v3 multi-VANTA marketplace surface. The fixture reader seeds three
   // islands so the marketplace UI renders before any on-chain
