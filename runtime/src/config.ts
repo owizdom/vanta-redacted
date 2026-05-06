@@ -35,9 +35,14 @@ const RawConfig = z.object({
   AMOY_CHAIN_ID: z.coerce.number().int().positive().default(80002),
   /** When 1, exposes /api/admin/deploy + /api/admin/send-tx for one-shot
    *  contract deploys signed by the in-TEE admin wallet. MUST go back to 0
-   *  after the initial deploy is complete — leaving it on lets anyone with
-   *  network access broadcast txs from the admin EOA. */
+   *  after the initial deploy is complete. Requires VANTA_DEPLOY_ADMIN_TOKEN
+   *  to be set; routes constant-time-compare an X-Admin-Token header
+   *  against it on every request. */
   VANTA_DEPLOY_ADMIN_ENABLED: z.coerce.boolean().default(false),
+  /** Random hex string ≥32 chars. Operator generates once, sets in the
+   *  encrypted env file, and supplies via X-Admin-Token header when calling
+   *  the admin routes. Without this set, the routes refuse with 503. */
+  VANTA_DEPLOY_ADMIN_TOKEN: z.string().default(""),
   LOAN_BOOK_ADDRESS: z
     .string()
     .regex(ETH_ADDR, "must be a 0x-prefixed 20-byte hex address")
@@ -263,6 +268,7 @@ export interface RuntimeConfig {
   readonly amoyRpcUrl: string;
   readonly amoyChainId: number;
   readonly deployAdminEnabled: boolean;
+  readonly deployAdminToken: string;
   readonly loanBookAddress: `0x${string}`;
   readonly lpVaultAddress: `0x${string}`;
   readonly expectedAdmin: `0x${string}` | null;
@@ -363,6 +369,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     amoyRpcUrl: raw.AMOY_RPC_URL,
     amoyChainId: raw.AMOY_CHAIN_ID,
     deployAdminEnabled: raw.VANTA_DEPLOY_ADMIN_ENABLED,
+    deployAdminToken: raw.VANTA_DEPLOY_ADMIN_TOKEN,
     loanBookAddress: loanBookAddress as `0x${string}`,
     lpVaultAddress: lpVaultAddress as `0x${string}`,
     expectedAdmin: expectedAdmin === undefined ? null : (expectedAdmin as `0x${string}`),

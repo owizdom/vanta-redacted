@@ -41,24 +41,49 @@ const SendTxBody = z
 
 export interface AdminDeployOpts {
   readonly enabled: boolean;
+  /** Required when enabled. Constant-time-compared against `X-Admin-Token`
+   *  header on every request. Set via VANTA_DEPLOY_ADMIN_TOKEN env. */
+  readonly token: string;
   readonly walletClient: WalletClient;
   readonly publicClient: PublicClient;
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
 }
 
 export async function registerAdminDeployRoutes(
   app: FastifyInstance,
   opts: AdminDeployOpts,
 ): Promise<void> {
-  const guard = (reply: { code: (c: number) => unknown }) => {
+  const guard = (
+    req: { headers: Record<string, string | string[] | undefined> },
+    reply: { code: (c: number) => unknown },
+  ) => {
     if (!opts.enabled) {
       void reply.code(404);
       return { error: "not_found" };
+    }
+    if (opts.token.length < 32) {
+      void reply.code(503);
+      return { error: "admin_token_unset_or_weak" };
+    }
+    const header = req.headers["x-admin-token"];
+    const supplied = typeof header === "string" ? header : "";
+    if (!timingSafeEqual(supplied, opts.token)) {
+      void reply.code(401);
+      return { error: "unauthorized" };
     }
     return null;
   };
 
   app.post("/api/admin/deploy", async (req, reply) => {
-    const denied = guard(reply);
+    const denied = guard(req, reply);
     if (denied !== null) return denied;
 
     const parsed = DeployBody.safeParse(req.body);
@@ -105,7 +130,7 @@ export async function registerAdminDeployRoutes(
   });
 
   app.post("/api/admin/send-tx", async (req, reply) => {
-    const denied = guard(reply);
+    const denied = guard(req, reply);
     if (denied !== null) return denied;
 
     const parsed = SendTxBody.safeParse(req.body);
@@ -150,8 +175,8 @@ export async function registerAdminDeployRoutes(
     }
   });
 
-  app.get("/api/admin/deploy/info", async (_req, reply) => {
-    const denied = guard(reply);
+  app.get("/api/admin/deploy/info", async (req, reply) => {
+    const denied = guard(req, reply);
     if (denied !== null) return denied;
     const account = opts.walletClient.account;
     return {

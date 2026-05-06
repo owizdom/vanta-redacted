@@ -276,6 +276,7 @@ async function startMain(): Promise<void> {
   await registerDevProbeRoute(app, { inference: boot.inference });
   await registerAdminDeployRoutes(app, {
     enabled: config.deployAdminEnabled,
+    token: config.deployAdminToken,
     walletClient: boot.walletClient,
     publicClient: boot.publicClient,
   });
