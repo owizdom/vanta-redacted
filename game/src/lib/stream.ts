@@ -134,6 +134,11 @@ function translateRuntimeEvent(raw: {
     agentId = 0;
   }
   if (agentId < 0) return null;
+  // Credit ticks are deliberately omitted: they're noisy, mostly
+  // numeric, and live in the operational layer rather than the
+  // narrative layer. The chat panel surfaces *reasoning* — NPC
+  // thoughts, council syntheses, deliberation traces, originations.
+  // Health-tick mechanics belong on the loan card, not the feed.
   const known: ReasoningEventType[] = [
     "reasoning.trace",
     "belief.updated",
@@ -149,36 +154,47 @@ function translateRuntimeEvent(raw: {
     "loan.mark",
     "loan.settlement",
     "loan.liquidation",
-    "loop.credit_tick",
   ];
   if (!known.includes(t)) return null;
 
-  // Per-type summary + detail derivation so each event renders well
-  // without requiring the runtime to pre-bake summary strings.
+  // Per-type summary + detail derivation. The detail string is what
+  // the chat panel reveals when the user expands a row — it MUST read
+  // as reasoning prose (decision_rationale, NPC thought, council
+  // synthesis text), never as raw event JSON. Auditors who want the
+  // raw envelope walk /api/events/:id; the chat panel is for humans.
   let summary = String(body["summary"] ?? raw.type);
-  let detail =
-    typeof body["detail"] === "string"
-      ? (body["detail"] as string)
-      : JSON.stringify(body, null, 2);
+  let detail = "";
 
   if (t === "npc.thought" && typeof body["thought"] === "string") {
     summary = body["thought"] as string;
-    detail = `Persona: ${String(body["npc_display_name"] ?? body["npc_id"] ?? "")}\n\n${
-      body["thought"] as string
-    }\n\nbelief ${formatCentibps(body["belief_centibps"])}, confidence ${formatBps(
-      body["confidence_bps"],
-    )}`;
+    detail = `${String(body["npc_display_name"] ?? body["npc_id"] ?? "townsperson")} weighing in:\n\n"${body["thought"] as string}"\n\nbelief ${formatCentibps(body["belief_centibps"])}  ·  confidence ${formatBps(body["confidence_bps"])}`;
   } else if (
     t === "council.synthesised" &&
     typeof body["rationale"] === "string"
   ) {
     const prior = formatCentibps(body["prior_belief_centibps"]);
     const post = formatCentibps(body["synthesised_belief_centibps"]);
+    const consumed =
+      (body["npc_thought_event_ids"] as readonly string[] | undefined)?.length ?? 0;
     summary = `council weighed townsfolk · belief ${prior} → ${post}`;
-    detail = `${body["rationale"] as string}\n\nthoughts consumed: ${
-      (body["npc_thought_event_ids"] as readonly string[] | undefined)?.length ??
-      0
-    }`;
+    detail = `${body["rationale"] as string}\n\nthe agent re-evaluated after hearing ${String(consumed)} townsperson${consumed === 1 ? "" : "s"}.\nprior ${prior}  →  synthesised ${post}.`;
+  } else if (t === "reasoning.trace") {
+    const rationale =
+      typeof body["decision_rationale"] === "string"
+        ? (body["decision_rationale"] as string)
+        : "";
+    const dissent =
+      typeof body["dissenting_considerations"] === "string"
+        ? (body["dissenting_considerations"] as string)
+        : "";
+    const subjectType =
+      typeof body["subject_event_type"] === "string"
+        ? (body["subject_event_type"] as string)
+        : "decision";
+    summary = rationale.length > 0 ? rationale : `reasoning behind ${subjectType}`;
+    detail = rationale.length > 0
+      ? `${rationale}${dissent.length > 0 ? `\n\ndissent: ${dissent}` : ""}`
+      : `reasoning trace for ${subjectType} (no rationale text recorded).`;
   } else if (t === "trade.decision") {
     const action = body["action"];
     const side = body["side"];
@@ -188,69 +204,125 @@ function translateRuntimeEvent(raw: {
         typeof size === "string" ? ` · size_usdc6=${size}` : ""
       }`;
     }
+    detail = `the agent decided to ${typeof action === "string" ? action.toUpperCase() : "act"}${
+      typeof side === "string" ? ` on the ${side.toUpperCase()} side` : ""
+    }${typeof size === "string" ? `, sizing ${size} USDC6` : ""}.`;
   } else if (t === "trade.executed") {
     summary = `executed${
       typeof body["size_usdc6"] === "string"
         ? ` · ${body["size_usdc6"] as string} USDC6`
         : ""
     }`;
+    detail = `position opened${
+      typeof body["size_usdc6"] === "string"
+        ? ` for ${body["size_usdc6"] as string} USDC6`
+        : ""
+    }${typeof body["entry_price_bps"] === "number" ? ` at ${(((body["entry_price_bps"] as number) / 10000) * 100).toFixed(2)}% mid` : ""}.`;
   } else if (t === "trade.closed") {
     summary = `position closed${
       typeof body["pnl_usdc6"] === "string"
         ? ` · pnl ${body["pnl_usdc6"] as string}`
         : ""
     }`;
+    detail = `position closed${
+      typeof body["pnl_usdc6"] === "string"
+        ? `, realised PnL ${body["pnl_usdc6"] as string} USDC6`
+        : ""
+    }.`;
   } else if (t === "pool.deposit") {
     summary = `deposit${
       typeof body["usdc6_amount"] === "string"
         ? ` · ${body["usdc6_amount"] as string} USDC6`
         : ""
     }`;
+    detail = `LP deposited${
+      typeof body["usdc6_amount"] === "string"
+        ? ` ${body["usdc6_amount"] as string} USDC6`
+        : ""
+    }${typeof body["depositor_addr"] === "string" ? ` from ${(body["depositor_addr"] as string).slice(0, 10)}…` : ""}.`;
   } else if (t === "pool.withdraw") {
     summary = `withdraw${
       typeof body["usdc6_returned"] === "string"
         ? ` · ${body["usdc6_returned"] as string} USDC6`
         : ""
     }`;
+    detail = `LP redeemed shares${
+      typeof body["usdc6_returned"] === "string"
+        ? `, returned ${body["usdc6_returned"] as string} USDC6`
+        : ""
+    }.`;
   } else if (t === "belief.updated") {
-    summary = `belief ${formatCentibps(
-      body["belief_centibps"],
-    )} (mid ${formatCentibps(body["mid_centibps"])})`;
+    const blf = formatCentibps(body["belief_centibps"]);
+    const mid = formatCentibps(body["mid_centibps"]);
+    summary = `belief ${blf} (mid ${mid})`;
+    detail = `the agent's belief about this market is now ${blf}, while the market mid is ${mid}.`;
   } else if (t === "loan.origination") {
     const principal = body["principal"] ?? body["principal_usdc6"];
     const haircut = body["haircut_bps"];
     summary = `loan originated${
       typeof principal === "string" ? ` · principal ${principal} USDC6` : ""
     }${typeof haircut === "number" ? ` · haircut ${(haircut / 100).toFixed(2)}%` : ""}`;
+    detail = `loan underwritten and recorded on-chain${
+      typeof principal === "string" ? `, principal ${principal} USDC6` : ""
+    }${typeof haircut === "number" ? ` at ${(haircut / 100).toFixed(2)}% haircut` : ""}.`;
   } else if (t === "loan.pledge") {
     summary = `pledge accepted${
       typeof body["amount"] === "string"
         ? ` · ${body["amount"] as string} CTF tokens`
         : ""
     }`;
+    detail = `borrower's CTF position escrowed in VantaVault${
+      typeof body["amount"] === "string"
+        ? `, ${body["amount"] as string} CTF tokens locked`
+        : ""
+    }.`;
   } else if (t === "loan.mark") {
     summary = `loan re-marked${
       typeof body["twap"] === "string"
         ? ` · TWAP ${body["twap"] as string}`
         : ""
     }`;
+    detail = `30-min TWAP refreshed from CLOB${
+      typeof body["twap"] === "string" ? ` to ${body["twap"] as string}` : ""
+    }.`;
   } else if (t === "loan.settlement") {
     summary = `loan settled${
       typeof body["amount"] === "string"
         ? ` · returned ${body["amount"] as string}`
         : ""
     }`;
+    detail = `borrower repaid in full${
+      typeof body["amount"] === "string"
+        ? `, returned ${body["amount"] as string} USDC6 to the pool`
+        : ""
+    }.`;
   } else if (t === "loan.liquidation") {
     summary = `loan LIQUIDATED${
       typeof body["reason"] === "string"
         ? ` — ${body["reason"] as string}`
         : ""
     }`;
+    detail = `loan was force-closed${
+      typeof body["reason"] === "string"
+        ? ` (${body["reason"] as string})`
+        : ""
+    }.`;
   } else if (t === "loop.credit_tick") {
     const flag = typeof body["flag"] === "string" ? (body["flag"] as string) : "ok";
     const ltv = typeof body["ltv_current_bps"] === "number" ? body["ltv_current_bps"] : 0;
     summary = `credit tick · flag ${flag.toUpperCase()} · LTV ${(ltv / 100).toFixed(2)}%`;
+    const flagText: Record<string, string> = {
+      ok: "loan is comfortably under the freeze threshold; no action.",
+      watch: "within the watch band — monitoring closely.",
+      freeze_request: "approaching freeze threshold; prepared to mark and call.",
+    };
+    detail = `${flagText[flag] ?? "credit health observed."} current LTV ${(ltv / 100).toFixed(2)}%.`;
   }
+
+  // Final guard: never render raw event JSON. If a downstream type
+  // slipped through without a detail string, fall back to the summary
+  // line so the expanded view stays readable.
+  if (detail.length === 0) detail = summary;
 
   return {
     id: raw.id,

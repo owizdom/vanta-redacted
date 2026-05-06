@@ -122,9 +122,6 @@ export function World(): JSX.Element {
         >
           ← VANTA
         </Link>
-        <span className="rounded-[2px] border border-ink-700 bg-ink-900/85 px-3 py-1.5 font-mono text-xs uppercase tracking-[0.22em] text-chalk-300">
-          plaza
-        </span>
         <span className="rounded-[2px] border border-ink-700 bg-ink-900/85 px-3 py-1.5 font-mono text-xs uppercase tracking-[0.22em] text-chalk-500">
           {agents.length} VANTAs registered
         </span>

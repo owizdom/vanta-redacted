@@ -574,6 +574,22 @@ const gapBpsField = integerNumber.refine(
   },
 );
 
+/**
+ * Delta of two `belief_centibps` values. Each side is in [0, 1_000_000],
+ * so the delta range is [-1_000_000, 1_000_000]. Distinct from `gap_bps`
+ * (basis points, ±10_000) because a centibps delta can exceed ±10_000
+ * — a 10pp belief shift is 100_000 centibps and a council synthesis can
+ * legitimately move belief by that much.
+ */
+const DELTA_CENTIBPS_MIN = -BELIEF_CENTIBPS_MAX;
+const DELTA_CENTIBPS_MAX = BELIEF_CENTIBPS_MAX;
+const deltaCentibpsField = integerNumber.refine(
+  (n) => n >= DELTA_CENTIBPS_MIN && n <= DELTA_CENTIBPS_MAX,
+  {
+    message: `delta_centibps must be in [${String(DELTA_CENTIBPS_MIN)}, ${String(DELTA_CENTIBPS_MAX)}]`,
+  },
+);
+
 const entryPriceBpsField = nonNegativeInteger.refine(
   (n) => n >= ENTRY_PRICE_BPS_MIN && n <= ENTRY_PRICE_BPS_MAX,
   {
@@ -700,9 +716,11 @@ const visitorIslandEnteredBodySchema = z
 /**
  * NPC id grammar: `<kingdom>.<persona-slug>.<index>` — e.g.
  * `vanta-opus.cloister-scholar.1`. Lowercase alpha + dots + dashes
- * + digits, 4..64 chars. Stable per-boot so audit chains stay readable.
+ * + digits, 4..64 chars. The trailing `<index>` segment may be purely
+ * numeric (the runtime + persona registry use `.1`, `.2`, etc.), so
+ * the third segment is permitted to start with `[a-z0-9]`.
  */
-const NPC_ID_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9-]*){2}$/;
+const NPC_ID_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\.[a-z][a-z0-9-]*\.[a-z0-9][a-z0-9-]*$/;
 const npcIdField = z
   .string()
   .min(4)
@@ -733,7 +751,7 @@ const councilSynthesisedBodySchema = z
     npc_thought_event_ids: z.array(hex64).min(1).max(8).readonly(),
     prior_belief_centibps: beliefCentibpsField,
     synthesised_belief_centibps: beliefCentibpsField,
-    delta_centibps: gapBpsField,
+    delta_centibps: deltaCentibpsField,
     synthesised_confidence_bps: probBpsField,
     rationale: z.string().min(1).max(4096),
     inference_event_id: hex64,

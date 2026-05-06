@@ -19,6 +19,9 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/runtime/, "/api"),
       },
+      // Demo-only admin surface — the borrower flow POSTs to
+      // /admin/demo/borrow on the runtime when the user submits.
+      "/admin": "http://127.0.0.1:8787",
       "/healthz": "http://127.0.0.1:8787",
       "/.well-known": "http://127.0.0.1:8787",
     },

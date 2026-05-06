@@ -41,6 +41,7 @@ import { registerIdentityRoute } from "./http/routes/identity.js";
 import { registerAttestationRoute } from "./http/routes/attestation.js";
 import { registerConstitutionRoute } from "./http/routes/constitution.js";
 import { registerEventsRoutes } from "./http/routes/events.js";
+import { registerAdminDemoRoutes } from "./http/routes/admin-demo.js";
 import { registerOriginationRoute } from "./http/routes/origination.js";
 import { registerSettleRoute } from "./http/routes/settle.js";
 import { registerHealthRoute } from "./http/routes/health.js";
@@ -181,6 +182,65 @@ async function emptyCandidates(): Promise<readonly CandidateInputs[]> {
   return [];
 }
 
+interface DemoPoolOverride {
+  readonly nav_usdc6: bigint;
+  readonly total_supply: bigint;
+  readonly max_aum_usdc6: bigint;
+  readonly open_notional_usdc6: bigint;
+  readonly lifetime_cost_basis_usdc6: bigint;
+  readonly lifetime_proceeds_usdc6: bigint;
+}
+
+/**
+ * Demo seed integration. If `VANTA_DEMO_POOLS_PATH` is set, read the
+ * JSON file and parse out per-agent fixture pool overrides. Used by
+ * the 10-min demo orchestrator to render lived-in TVL + interest
+ * accrued before the runtime even ticks. Returns an empty map when
+ * the env var is absent or the file is missing/malformed (silent —
+ * production never hits this path).
+ */
+function loadDemoPoolOverrides(): Map<number, DemoPoolOverride> {
+  const path = process.env["VANTA_DEMO_POOLS_PATH"];
+  if (typeof path !== "string" || path.length === 0) return new Map();
+  try {
+    // Local imports to keep startup unaffected when env is absent.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require("node:fs") as typeof import("node:fs");
+    if (!fs.existsSync(path)) return new Map();
+    const raw = fs.readFileSync(path, "utf8");
+    const parsed = JSON.parse(raw) as {
+      pools?: ReadonlyArray<{
+        agent_id?: number;
+        nav_usdc6?: string;
+        total_supply?: string;
+        max_aum_usdc6?: string;
+        open_notional_usdc6?: string;
+        lifetime_cost_basis_usdc6?: string;
+        lifetime_proceeds_usdc6?: string;
+      }>;
+    };
+    const out = new Map<number, DemoPoolOverride>();
+    for (const p of parsed.pools ?? []) {
+      if (typeof p.agent_id !== "number") continue;
+      try {
+        out.set(p.agent_id, {
+          nav_usdc6: BigInt(p.nav_usdc6 ?? "0"),
+          total_supply: BigInt(p.total_supply ?? "0"),
+          max_aum_usdc6: BigInt(p.max_aum_usdc6 ?? "0"),
+          open_notional_usdc6: BigInt(p.open_notional_usdc6 ?? "0"),
+          lifetime_cost_basis_usdc6: BigInt(p.lifetime_cost_basis_usdc6 ?? "0"),
+          lifetime_proceeds_usdc6: BigInt(p.lifetime_proceeds_usdc6 ?? "0"),
+        });
+      } catch {
+        // Skip malformed entries; rest still load.
+      }
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
 // -----------------------------------------------------------------------
 // Main
 // -----------------------------------------------------------------------
@@ -207,6 +267,7 @@ async function startMain(): Promise<void> {
   await registerAttestationRoute(app);
   await registerConstitutionRoute(app);
   await registerEventsRoutes(app);
+  await registerAdminDemoRoutes(app, createSignedEventSink(boot));
   await registerOriginationRoute(app);
   await registerSettleRoute(app);
   await registerMarketsRoutes(app, { marketsCache: boot.marketsCache });
@@ -217,22 +278,35 @@ async function startMain(): Promise<void> {
   // islands so the marketplace UI renders before any on-chain
   // registration happens; viem-backed readers replace this when the
   // AgentRegistry is deployed and `V3_REGISTRY_ADDRESS` is set in env.
+  //
+  // Demo override: if `VANTA_DEMO_POOLS_PATH` points at a JSON file with
+  // `{pools: [{agent_id, nav_usdc6, ...}, ...]}`, we replace the zero
+  // defaults with those values per agent. Used by `scripts/demo/seed-onchain.ts`
+  // so the demo's marketplace + agent detail card render lived-in TVL.
   const v3Registry = createFixtureRegistryReader(DEFAULT_FIXTURE_AGENTS);
+  const demoPools = loadDemoPoolOverrides();
   const v3PoolReaders = new Map<number, PoolReader>();
   for (const agent of DEFAULT_FIXTURE_AGENTS) {
+    const override = demoPools.get(agent.agent_id);
     v3PoolReaders.set(
       agent.agent_id,
       createFixturePoolReader({
         agent_id: agent.agent_id,
         pool: agent.pool,
         position_book: agent.position_book,
-        nav_usdc6: 0n,
-        total_supply: 0n,
-        max_aum_usdc6: 10_000_000_000n,
-        open_notional_usdc6: 0n,
-        lifetime_cost_basis_usdc6: 0n,
-        lifetime_proceeds_usdc6: 0n,
+        nav_usdc6: override?.nav_usdc6 ?? 0n,
+        total_supply: override?.total_supply ?? 0n,
+        max_aum_usdc6: override?.max_aum_usdc6 ?? 10_000_000_000n,
+        open_notional_usdc6: override?.open_notional_usdc6 ?? 0n,
+        lifetime_cost_basis_usdc6: override?.lifetime_cost_basis_usdc6 ?? 0n,
+        lifetime_proceeds_usdc6: override?.lifetime_proceeds_usdc6 ?? 0n,
       }),
+    );
+  }
+  if (demoPools.size > 0) {
+    app.log.info(
+      { agents: Array.from(demoPools.keys()) },
+      "demo_pool_overrides_loaded",
     );
   }
   await registerAgentsRoutes(app, {

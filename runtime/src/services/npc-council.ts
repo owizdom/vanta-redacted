@@ -329,13 +329,17 @@ export function createNpcCouncil(args: NpcCouncilArgs): NpcCouncil {
         const parsed = parseThought(llm.text);
         if (parsed === null) return null;
 
-        // Emit op.inference for the NPC's call.
+        // Emit op.inference for the NPC's call. Schema invariant:
+        // bot_handle must be empty for non-`population_bot` roles. The
+        // NPC's identity is preserved on the paired `npc.thought`
+        // (npc_id + persona + display name); the inference event is
+        // linked via `inference_event_id`.
         const inferenceId = await args.events.emit({
           type: "op.inference",
           body: {
             inference_id: asSha256Hex(llm.response_text_hash),
             role: "researcher",
-            bot_handle: persona.npcId,
+            bot_handle: "",
             provider: llm.provider,
             model: llm.model,
             request_canonical_hash: llm.request_canonical_hash,
@@ -400,13 +404,15 @@ export function createNpcCouncil(args: NpcCouncilArgs): NpcCouncil {
     const parsedSynth = parseSynthesis(synthLlm.text);
     if (parsedSynth === null) return null;
 
-    // Synthesis-call op.inference event.
+    // Synthesis-call op.inference event. bot_handle stays empty —
+    // role="evaluator" is not `population_bot`, and the council's
+    // attribution lives on `council.synthesised.agent_id`.
     const synthInferenceId = await args.events.emit({
       type: "op.inference",
       body: {
         inference_id: asSha256Hex(synthLlm.response_text_hash),
         role: "evaluator",
-        bot_handle: `vanta-${String(args.agent_id)}-council`,
+        bot_handle: "",
         provider: synthLlm.provider,
         model: synthLlm.model,
         request_canonical_hash: synthLlm.request_canonical_hash,

@@ -6,6 +6,10 @@
   "scripts": {
     "noop": "true"
   },
+  "dependencies": {
+    "@vanta/events": "workspace:*",
+    "@vanta/tee": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "tsx": "^4.19.2",
