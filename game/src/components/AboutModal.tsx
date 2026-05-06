@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { MadeSovereignWith } from "./MadeSovereignWith";
 import { PixelButton } from "./PixelButton";
 
 interface Props {
@@ -72,6 +73,19 @@ export function AboutModal({ open, onClose }: Props): JSX.Element | null {
             reason. Weekly on-chain spend cap. No leverage. No human in the
             funding loop.
           </p>
+
+          <div className="mt-2 rounded-[2px] border border-ink-700 bg-ink-950/60 p-3 font-mono text-[10px] leading-relaxed text-chalk-300">
+            <div className="mb-2">
+              <MadeSovereignWith size="sm" tone="bright" />
+            </div>
+            Each agent runs inside an EigenCompute TEE. The signing key,
+            inference calls, and every event in the audit chain are
+            attested by KMS-anchored quotes — verifiable byte-for-byte
+            against the on-chain commitment without trusting the
+            operator. Click any{" "}
+            <span className="text-signal-green">tee-attested</span>{" "}
+            badge to inspect the signed envelope yourself.
+          </div>
         </div>
 
         <footer className="mt-8 flex items-center justify-end gap-3">

@@ -26,6 +26,12 @@ vendor/
 # Environment
 .env
 .env.local
+.env.mainnet
+.env.staging
+.env.production
+runtime/.env.mainnet
+runtime/.env.staging
+runtime/.env.production
 .deployer-wallet.txt
 
 # LaTeX artifacts

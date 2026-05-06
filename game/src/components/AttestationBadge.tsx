@@ -44,10 +44,10 @@ export function AttestationBadge({ eventId, attestationHash }: Props): JSX.Eleme
       <button
         onClick={() => void onOpen()}
         className="inline-flex items-center gap-2 rounded-[2px] border border-signal-green/50 bg-signal-green/10 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-signal-green hover:border-signal-green hover:bg-signal-green/20"
-        title="View signed TEE attestation"
+        title="Signed inside an EigenCloud TEE — click to verify the envelope"
       >
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-signal-green animate-pulseDot" />
-        TEE-attested
+        TEE-attested · Eigen
         {attestationHash ? (
           <span className="ml-1 text-chalk-400">{shortHash(attestationHash, 6, 4)}</span>
         ) : null}
@@ -65,10 +65,15 @@ export function AttestationBadge({ eventId, attestationHash }: Props): JSX.Eleme
             <header className="mb-4 flex items-center justify-between border-b border-ink-800 pb-3">
               <div>
                 <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-signal-green">
-                  signed envelope
+                  signed envelope · TEE on EigenCloud
                 </div>
                 <div className="font-mono text-xs text-chalk-300">
                   {eventId ? shortHash(eventId, 8, 6) : "—"}
+                </div>
+                <div className="mt-1 font-mono text-[9px] text-chalk-500">
+                  Ed25519 signed inside an EigenCompute enclave; the public key + KMS-anchored
+                  attestation are part of every envelope. Verify externally via the canonical-JSON
+                  bytes below.
                 </div>
               </div>
               <button

@@ -1,6 +1,7 @@
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Link } from "react-router-dom";
 
+import { MadeSovereignWith } from "../components/MadeSovereignWith";
 import { MarketplaceGrid } from "../components/MarketplaceGrid";
 
 export function Marketplace(): JSX.Element {
@@ -47,6 +48,9 @@ export function Marketplace(): JSX.Element {
           <p className="font-mono text-xs uppercase tracking-[0.22em] text-chalk-500">
             base sepolia · 77% liquidation floor · weekly on-chain spend cap
           </p>
+          <div className="pt-1">
+            <MadeSovereignWith size="md" />
+          </div>
         </section>
 
         {/* grid */}
