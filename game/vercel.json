@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    {
+      "source": "/api/runtime/:path*",
+      "destination": "http://EIGEN_RUNTIME_HOST_PLACEHOLDER:8787/api/:path*"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import { parseAbi, type Address } from "viem";
-import { baseSepolia } from "wagmi/chains";
+import { base, baseSepolia } from "wagmi/chains";
 
 /**
  * Static contract addresses + minimal viable ABIs for the deposit /
@@ -7,14 +7,18 @@ import { baseSepolia } from "wagmi/chains";
  * VANTA) so its address arrives via /api/agents/:id; only the ABI
  * is shared here.
  *
- * USDC on Base Sepolia is the same standard contract every L2
- * testnet uses. If we ever multi-chain (Polygon Amoy, etc), branch
- * by chain id.
+ * Chain selection: VITE_CHAIN_ENV=mainnet → Base mainnet (8453);
+ * anything else → Base Sepolia (84532). Production Vercel build
+ * sets VITE_CHAIN_ENV=mainnet.
  */
 
-export const CHAIN_ID = baseSepolia.id;
+const IS_MAINNET = import.meta.env.VITE_CHAIN_ENV === "mainnet";
 
-export const USDC_ADDRESS: Address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+export const CHAIN_ID = IS_MAINNET ? base.id : baseSepolia.id;
+
+export const USDC_ADDRESS: Address = IS_MAINNET
+  ? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+  : "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 
 /** Standard ERC-20 subset used by approve/balanceOf/allowance flows. */
 export const ERC20_ABI = parseAbi([
@@ -49,7 +53,8 @@ export const AGENT_POOL_VAULT_ABI = parseAbi([
 
 /** Block explorer URL for a tx hash on the configured chain. */
 export function explorerTxUrl(txHash: string): string {
-  return `https://sepolia.basescan.org/tx/${txHash}`;
+  const host = IS_MAINNET ? "basescan.org" : "sepolia.basescan.org";
+  return `https://${host}/tx/${txHash}`;
 }
 
 /** Convert a string like "5.0" → 5_000_000n (6-decimal USDC wei). */

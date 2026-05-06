@@ -1,6 +1,9 @@
 /**
- * Runtime API client. All paths go through the vite proxy at
- *   /api/runtime/*  →  http://127.0.0.1:8787/api/*
+ * Runtime API client. Default base is `/api/runtime` (Vite dev proxy
+ * locally; Vercel rewrites in production — see game/vercel.json).
+ * Override via VITE_RUNTIME_URL when proxying isn't an option (e.g.
+ * direct EigenCompute IP for cross-origin debugging — requires CORS
+ * on the runtime side).
  *
  * Keeping this framework-agnostic — same shape as /web/src/lib/runtime.ts
  * so we can reuse types and call sites between the two surfaces.
@@ -33,7 +36,7 @@ export interface TeeIdentity {
   readonly identityAnchor?: { readonly kind: string };
 }
 
-const ROOT = "/api/runtime";
+const ROOT = import.meta.env.VITE_RUNTIME_URL ?? "/api/runtime";
 
 async function getJson<T>(path: string): Promise<T> {
   const r = await fetch(`${ROOT}${path}`, { cache: "no-store" });

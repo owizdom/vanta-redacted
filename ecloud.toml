@@ -16,10 +16,11 @@ rebind_seconds = 3600
 
 [egress]
 allow = [
+  "ai-gateway.eigencloud.xyz",
   "ai-gateway.vercel.sh",
   "clob.polymarket.com",
   "gateway-api.polymarket.com",
-  "sepolia.base.org",
-  "rpc-amoy.polygon.technology",
+  "mainnet.base.org",
+  "polygon-rpc.com",
   "walrus.xyz",
 ]

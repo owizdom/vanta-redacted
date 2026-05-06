@@ -70,7 +70,8 @@ export interface ReasoningStream {
 export function sseStream(): ReasoningStream {
   return {
     subscribe(handler) {
-      const es = new EventSource("/api/runtime/events/stream");
+      const sseRoot = import.meta.env.VITE_RUNTIME_URL ?? "/api/runtime";
+      const es = new EventSource(`${sseRoot}/events/stream`);
       es.onmessage = (msg) => {
         try {
           const raw = JSON.parse(String(msg.data)) as {

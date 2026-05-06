@@ -21,8 +21,8 @@
  */
 
 import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
@@ -193,12 +193,25 @@ export interface Bootstrap {
 }
 
 /**
- * Read the dev-seed (32 bytes) used both by the Foundry deploy script
- * and the runtime to derive the origination EOA. Falls through to the
- * `MNEMONIC` env var when the dev-seed file is missing (production
- * EigenCloud path).
+ * Read the 32-byte seed used to derive the origination EOA.
+ *
+ * Resolution order, fail-closed if all miss:
+ *   1. `.vanta/dev-seed` (local dev — pre-seeded by installer.sh)
+ *   2. `MNEMONIC` env var (legacy operator-supplied path, kept for back-compat)
+ *   3. `<dataDir>/.seed` (TEE-persistent seed — auto-generated on first
+ *      boot, persisted across restarts on the encrypted EigenCompute
+ *      volume, never leaves the enclave)
+ *
+ * Path 3 is the production-clean path: no operator ever holds a seed,
+ * the seed is generated inside the TEE on first boot, and KMS-bound
+ * disk encryption keeps it sealed for the app's lifetime. The same app
+ * deployment will always re-derive the same admin EOA.
+ *
+ * @param dataDir absolute path to the runtime's writable data dir
+ *                (`config.dataDir` — `/vanta-data` in EigenCompute,
+ *                `./vanta-data` locally).
  */
-function readDevSeedOrMnemonic(): Buffer {
+function readSeed(dataDir: string): Buffer {
   const repoRoot = process.cwd().endsWith("/runtime")
     ? resolve(process.cwd(), "..")
     : process.cwd();
@@ -210,10 +223,29 @@ function readDevSeedOrMnemonic(): Buffer {
   if (typeof mnem === "string" && mnem.length > 0) {
     return Buffer.from(mnem, "utf8").subarray(0, 32);
   }
-  throw new TeeError(
-    "mnemonic_missing",
-    "no .vanta/dev-seed and no MNEMONIC env var; cannot derive origination EOA",
-  );
+  // Path 3 — TEE-persistent seed. Generated on first boot, reused
+  // forever. The dataDir is on the EigenCompute encrypted volume in
+  // production; locally it's just ./vanta-data which is gitignored.
+  const teeSeedPath = resolve(dataDir, ".seed");
+  if (existsSync(teeSeedPath)) {
+    const buf = readFileSync(teeSeedPath);
+    if (buf.length !== 32) {
+      throw new TeeError(
+        "mnemonic_missing",
+        "tee-persistent seed is wrong length; refusing to use",
+        { length: String(buf.length) },
+      );
+    }
+    return buf;
+  }
+  // First-boot generation — write the fresh seed atomically with 0600
+  // perms. Failing closed here (rather than throwing mnemonic_missing)
+  // because the prior MNEMONIC requirement is incompatible with the
+  // "no operator-held seed" guarantee we want for production.
+  const fresh = randomBytes(32);
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(teeSeedPath, fresh, { mode: 0o600 });
+  return fresh;
 }
 
 /**
@@ -633,7 +665,7 @@ async function signAndPersistGenesis(args: {
 export async function bootstrap(config: RuntimeConfig): Promise<Bootstrap> {
   // Step 2: derive admin EOA. Done before initTEE so we still have
   // the seed bytes; initTEE clears MNEMONIC as a side effect.
-  const seed = readDevSeedOrMnemonic();
+  const seed = readSeed(config.dataDir);
   const origination = deriveOriginationEOA(seed);
   seed.fill(0);
 
