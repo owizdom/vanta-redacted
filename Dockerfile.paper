@@ -40,6 +40,8 @@ RUN printf '%s\n' \
     "view-distance=6" \
     "simulation-distance=4" \
     "enable-rcon=false" \
+    "difficulty=peaceful" \
+    "spawn-monsters=false" \
     > /paper/server.properties
 
 # Disable Paper's connection-throttle. Default is 4000 ms per IP, which
