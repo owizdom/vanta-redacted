@@ -37,11 +37,12 @@ RUN printf '%s\n' \
     "motd=VANTA - the company you can walk inside" \
     "max-players=20" \
     "spawn-protection=0" \
-    "view-distance=6" \
-    "simulation-distance=4" \
+    "view-distance=32" \
+    "simulation-distance=32" \
     "enable-rcon=false" \
     "difficulty=peaceful" \
     "spawn-monsters=false" \
+    "level-seed=plains" \
     > /paper/server.properties
 
 # Disable Paper's connection-throttle. Default is 4000 ms per IP, which

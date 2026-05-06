@@ -25,8 +25,12 @@ import org.bukkit.World
 import org.bukkit.block.BlockFace
 import org.bukkit.block.data.Bisected
 import org.bukkit.block.data.type.Stairs
+import org.bukkit.entity.EntityType
+import org.bukkit.entity.Goat
+import org.bukkit.entity.Parrot
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
@@ -37,8 +41,9 @@ class WorldBuilder(private val plugin: JavaPlugin) {
     private val plazaY = 63                  // stone-brick floor sits at y=63, walkable surface y=64
     private val plazaHalf = 60               // 120×120 plaza
     private val plazaClearAbove = 60         // clear up to y=123 over the plaza
+    private val bufferRadius = 60            // 60-block cleared+painted ring outside the plaza wall
 
-    private val currentVersion = "v10"  // bump → re-place on next boot
+    private val currentVersion = "v17"  // bump → re-place on next boot
 
     fun placeIfNeeded(world: World) {
         val pdc = world.persistentDataContainer
@@ -49,6 +54,10 @@ class WorldBuilder(private val plugin: JavaPlugin) {
         }
         plugin.logger.info("vanta-world: placing structures at world origin (had=$current, want=$currentVersion)")
         clearAndPlaza(world)
+        clearBufferZone(world)
+        paintBufferAsPlains(world)
+        spawnBirds(world)
+        spawnGoats(world)
         buildDesk(world)
         buildPledgeAltar(world)
         buildMarkBelfry(world)
@@ -73,6 +82,16 @@ class WorldBuilder(private val plugin: JavaPlugin) {
         val xs = min(x1, x2)..max(x1, x2)
         val ys = min(y1, y2)..max(y1, y2)
         val zs = min(z1, z2)..max(z1, z2)
+        // Force-load every chunk the fill touches before writing blocks.
+        // Bukkit docs say getBlockAt auto-loads, but on first-boot worlds
+        // the far perimeter chunks (e.g. (-60..60, -60)) sometimes silently
+        // dropped wall blocks. Explicit loadChunk(x, z, true) is the
+        // belt-and-suspenders fix; harmless when chunks are already loaded.
+        val cxRange = (xs.first shr 4)..(xs.last shr 4)
+        val czRange = (zs.first shr 4)..(zs.last shr 4)
+        for (cx in cxRange) for (cz in czRange) {
+            world.loadChunk(cx, cz, true)
+        }
         for (x in xs) for (y in ys) for (z in zs) {
             world.getBlockAt(x, y, z).type = mat
         }
@@ -96,6 +115,114 @@ class WorldBuilder(private val plugin: JavaPlugin) {
         for (z in -plazaHalf..plazaHalf) {
             set(world, -plazaHalf, plazaY, z, Material.POLISHED_BLACKSTONE)
             set(world,  plazaHalf, plazaY, z, Material.POLISHED_BLACKSTONE)
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // 0b. Buffer zone — clear a 30-block ring outside the plaza wall
+    // so trees, hills, and ocean spikes don't crowd the perimeter
+    // regardless of which seed Paper picked. Beyond the buffer, natural
+    // terrain stays intact (mountains, biomes, mobs).
+    // -----------------------------------------------------------------
+
+    private fun clearBufferZone(world: World) {
+        val outer = plazaHalf + bufferRadius
+        val clearTop = plazaY + plazaClearAbove   // same vertical envelope as plaza
+        plugin.logger.info("vanta-world: clearing buffer zone (radius=$bufferRadius)")
+        // Four rectangular bands around the plaza, no overlap with plaza interior.
+        // North band: full width × bufferRadius deep, z from -outer..-plazaHalf-1
+        fill(world, -outer, plazaY + 1, -outer, outer, clearTop, -plazaHalf - 1, Material.AIR)
+        // South band: z from plazaHalf+1..outer
+        fill(world, -outer, plazaY + 1,  plazaHalf + 1, outer, clearTop,  outer, Material.AIR)
+        // West band: x from -outer..-plazaHalf-1, z spans only plaza width
+        fill(world, -outer, plazaY + 1, -plazaHalf, -plazaHalf - 1, clearTop, plazaHalf, Material.AIR)
+        // East band: x from plazaHalf+1..outer
+        fill(world,  plazaHalf + 1, plazaY + 1, -plazaHalf, outer, clearTop, plazaHalf, Material.AIR)
+    }
+
+    // -----------------------------------------------------------------
+    // 0c. Paint the buffer ring as plains — grass-block floor, plains
+    // biome label, sparse flowers + tall grass. Seed-independent: even
+    // if the natural biome is taiga / ocean / desert, the cleared ring
+    // around the plaza always reads as a plains meadow. Beyond the
+    // ring, original biomes (forests, mountains, goats) stay intact.
+    // -----------------------------------------------------------------
+
+    // -----------------------------------------------------------------
+    // 0d. Birds — scatter persistent parrots (random colours) around
+    // the buffer ring at perch height. Parrots flap, bob, and follow
+    // nearby players, giving the plaza approach some life.
+    // -----------------------------------------------------------------
+
+    private fun spawnBirds(world: World) {
+        val outer = plazaHalf + bufferRadius
+        val rng = java.util.Random((currentVersion + ":birds").hashCode().toLong())
+        val variants = Parrot.Variant.values()
+        plugin.logger.info("vanta-world: spawning birds")
+        var spawned = 0
+        var attempts = 0
+        while (spawned < 40 && attempts < 600) {
+            attempts++
+            val x = rng.nextInt(outer * 2 + 1) - outer
+            val z = rng.nextInt(outer * 2 + 1) - outer
+            // Skip plaza interior; only spawn in the painted ring
+            if (abs(x) <= plazaHalf && abs(z) <= plazaHalf) continue
+            val loc = Location(world, x + 0.5, plazaY + 6.0, z + 0.5)
+            val parrot = world.spawnEntity(loc, EntityType.PARROT) as? Parrot ?: continue
+            parrot.variant = variants[rng.nextInt(variants.size)]
+            parrot.setPersistent(true)
+            parrot.isInvulnerable = true
+            spawned++
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // 0e. Goats — scatter persistent goats in the buffer ring. Goats
+    // need mountain biomes to spawn naturally and the seed rarely
+    // puts one within view distance, so we spawn explicitly. One in
+    // ~6 is the rare screaming variant.
+    // -----------------------------------------------------------------
+
+    private fun spawnGoats(world: World) {
+        val outer = plazaHalf + bufferRadius
+        val rng = java.util.Random((currentVersion + ":goats").hashCode().toLong())
+        plugin.logger.info("vanta-world: spawning goats")
+        var spawned = 0
+        var attempts = 0
+        while (spawned < 30 && attempts < 600) {
+            attempts++
+            val x = rng.nextInt(outer * 2 + 1) - outer
+            val z = rng.nextInt(outer * 2 + 1) - outer
+            if (abs(x) <= plazaHalf && abs(z) <= plazaHalf) continue
+            val loc = Location(world, x + 0.5, plazaY + 1.0, z + 0.5)
+            val goat = world.spawnEntity(loc, EntityType.GOAT) as? Goat ?: continue
+            goat.isScreaming = rng.nextInt(6) == 0
+            goat.setPersistent(true)
+            spawned++
+        }
+    }
+
+    private fun paintBufferAsPlains(world: World) {
+        val outer = plazaHalf + bufferRadius
+        plugin.logger.info("vanta-world: painting buffer as plains (radius=$bufferRadius)")
+        val rng = java.util.Random(currentVersion.hashCode().toLong())
+        for (x in -outer..outer) {
+            for (z in -outer..outer) {
+                val ax = kotlin.math.abs(x)
+                val az = kotlin.math.abs(z)
+                if (ax <= plazaHalf && az <= plazaHalf) continue   // skip plaza interior
+                world.getBlockAt(x, plazaY, z).type = Material.GRASS_BLOCK
+                world.setBiome(x, plazaY, z, org.bukkit.block.Biome.PLAINS)
+                if (rng.nextInt(100) < 3) {
+                    val flower = when (rng.nextInt(4)) {
+                        0 -> Material.OXEYE_DAISY
+                        1 -> Material.DANDELION
+                        2 -> Material.POPPY
+                        else -> Material.TALL_GRASS
+                    }
+                    world.getBlockAt(x, plazaY + 1, z).type = flower
+                }
+            }
         }
     }
 
