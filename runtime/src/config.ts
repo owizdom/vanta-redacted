@@ -51,6 +51,16 @@ const RawConfig = z.object({
     .string()
     .regex(ETH_ADDR, "must be a 0x-prefixed 20-byte hex address")
     .optional(),
+  /** VantaVault on Polygon — receives pledged Polymarket CTF positions. */
+  VANTA_VAULT_ADDRESS: z
+    .string()
+    .regex(ETH_ADDR, "must be a 0x-prefixed 20-byte hex address")
+    .optional(),
+  /** Polymarket Conditional Tokens (ERC-1155) on Polygon. */
+  POLYMARKET_CTF_ADDRESS: z
+    .string()
+    .regex(ETH_ADDR, "must be a 0x-prefixed 20-byte hex address")
+    .optional(),
   EXPECTED_ADMIN: z
     .string()
     .regex(ETH_ADDR, "must be a 0x-prefixed 20-byte hex address")
@@ -271,6 +281,8 @@ export interface RuntimeConfig {
   readonly deployAdminToken: string;
   readonly loanBookAddress: `0x${string}`;
   readonly lpVaultAddress: `0x${string}`;
+  readonly vantaVaultAddress: `0x${string}`;
+  readonly polymarketCtfAddress: `0x${string}`;
   readonly expectedAdmin: `0x${string}` | null;
   readonly markTickSeconds: number;
   readonly deploymentsDir: string;
@@ -360,6 +372,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     );
   }
 
+  // VantaVault: same address as LpVault on the current deploy (same deployer +
+  // same nonce on Polygon). Allow explicit override; otherwise default to the
+  // LpVault address so the prod path works without a config flip.
+  let vantaVaultAddress: `0x${string}` =
+    (raw.VANTA_VAULT_ADDRESS as `0x${string}` | undefined) ??
+    (lpVaultAddress as `0x${string}`);
+
+  // Polymarket Conditional Tokens. Canonical mainnet address; testnet
+  // deploys override via env.
+  const POLYMARKET_CTF_MAINNET =
+    "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045" as `0x${string}`;
+  const POLYMARKET_CTF_AMOY =
+    "0x69308FB512518e39F9b16112fA8d994F4e2Bf8bB" as `0x${string}`;
+  const polymarketCtfAddress: `0x${string}` =
+    (raw.POLYMARKET_CTF_ADDRESS as `0x${string}` | undefined) ??
+    (raw.AMOY_CHAIN_ID === 137 ? POLYMARKET_CTF_MAINNET : POLYMARKET_CTF_AMOY);
+
   return {
     port: raw.PORT,
     host: raw.HOST,
@@ -372,6 +401,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     deployAdminToken: raw.VANTA_DEPLOY_ADMIN_TOKEN,
     loanBookAddress: loanBookAddress as `0x${string}`,
     lpVaultAddress: lpVaultAddress as `0x${string}`,
+    vantaVaultAddress,
+    polymarketCtfAddress,
     expectedAdmin: expectedAdmin === undefined ? null : (expectedAdmin as `0x${string}`),
     markTickSeconds: raw.MARK_TICK_SECONDS,
     deploymentsDir: raw.DEPLOYMENTS_DIR,

@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useAccount, useReadContracts } from "wagmi";
+import {
+  useAccount,
+  useReadContracts,
+  useWaitForTransactionReceipt,
+  useWriteContract,
+} from "wagmi";
+import { parseAbi } from "viem";
 
 import type { Kingdom } from "../lib/kingdoms";
 import {
@@ -13,6 +19,16 @@ import {
   type DemoMarket,
 } from "../lib/markets";
 import { sseStream, type ReasoningEvent } from "../lib/stream";
+import { DEMO_ADDRESS } from "../lib/wallets/demo-wallet";
+
+// VantaVault address — same on Polygon as LpVault on Base for the V0
+// deploy (same TEE-derived deployer + same nonce). Hardcoded for the
+// frontend to skip a runtime round-trip.
+const VANTA_VAULT_ADDRESS = "0xe2f93c448d9fc51155e2e06479b3b1e86f8ae45b" as const;
+
+const CTF_TRANSFER_ABI = parseAbi([
+  "function safeTransferFrom(address from, address to, uint256 id, uint256 value, bytes data)",
+]);
 
 interface Props {
   readonly kingdom: Kingdom;
@@ -22,8 +38,8 @@ interface Props {
 
 type FormStage =
   | { kind: "input" }
-  | { kind: "submitting" }
-  | { kind: "submitted"; loanId: string; principalUsdc6: string; haircutBps: number }
+  | { kind: "submitting"; step?: string }
+  | { kind: "submitted"; loanId: string; principalUsdc6: string; haircutBps: number; real?: boolean; txHash?: string }
   | { kind: "denied"; reason: string }
   | { kind: "error"; message: string };
 
@@ -141,6 +157,15 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
 
   const hasRealPositions = portfolio.some((p) => p.real);
 
+  // Demo wallet detection — synthetic address has no signer; the
+  // real-borrow path below would prompt for a sig the wallet can't
+  // produce, so demo always falls through to /admin/demo/borrow.
+  const isDemoWallet =
+    address !== undefined &&
+    address.toLowerCase() === DEMO_ADDRESS.toLowerCase();
+
+  const { writeContractAsync } = useWriteContract();
+
   const [selectedIdx, setSelectedIdx] = useState<number>(0);
   const [principalUsdc, setPrincipalUsdc] = useState("500");
   const [maturityDays, setMaturityDays] = useState("30");
@@ -234,6 +259,30 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
     setSubmitTime(Date.now());
     setRequestSeq((s) => s + 1);
     setFeed([]);
+
+    // ----- REAL flow: connected wallet (non-demo) holds CTF for the
+    //       selected market. We register them on VantaVault if needed,
+    //       have them pledge the CTF on Polygon, wait for the runtime's
+    //       signed loan.pledge event, and call /api/origination with
+    //       the pledgeEventId to land a real LoanBook entry on Base.
+    if (!isDemoWallet && selected.real) {
+      try {
+        await runRealBorrow({
+          borrower: address,
+          tokenId: selected.market.tokenId,
+          conditionIdHex: selected.market.conditionIdHex,
+          principalUsdc6,
+          maturityTsUnix,
+          shares: selected.shares,
+          setStage,
+          writeContractAsync,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setStage({ kind: "error", message: `real borrow failed: ${msg}` });
+      }
+      return;
+    }
 
     try {
       const r = await fetch("/admin/demo/borrow", {
@@ -469,14 +518,14 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
             style={{ background: kingdom.color, color: "#0b0b0e", boxShadow: `0 0 24px -6px ${kingdom.color}` }}
           >
             {stage.kind === "submitting"
-              ? "council deliberating…"
+              ? stage.step ?? "council deliberating…"
               : `submit to ${kingdom.displayName} council`}
           </button>
 
           {stage.kind === "submitted" ? (
             <div className="mt-3 rounded-[2px] border border-signal-green/60 bg-signal-green/10 p-3 font-mono text-[10px]">
               <div className="text-signal-green">
-                approved · loan {stage.loanId.slice(0, 12)}…
+                {stage.real ? "✓ on-chain" : "approved"} · loan {stage.loanId.slice(0, 12)}…
               </div>
               <div className="mt-1 text-chalk-300">
                 ${(Number(stage.principalUsdc6) / 1_000_000).toLocaleString()} USDC sent to your wallet
@@ -484,6 +533,16 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
                   · haircut {(stage.haircutBps / 100).toFixed(0)}%
                 </span>
               </div>
+              {stage.txHash ? (
+                <a
+                  href={`https://basescan.org/tx/${stage.txHash}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 block text-chalk-500 hover:text-chalk-300"
+                >
+                  loanbook tx {stage.txHash.slice(0, 10)}…{stage.txHash.slice(-6)} ↗
+                </a>
+              ) : null}
             </div>
           ) : null}
           {stage.kind === "denied" ? (
@@ -596,4 +655,194 @@ function NumberInput({ label, value, onChange, prefix }: NumberInputProps): JSX.
       </div>
     </label>
   );
+}
+
+interface RealBorrowArgs {
+  readonly borrower: `0x${string}`;
+  readonly tokenId: string;
+  readonly conditionIdHex: string;
+  readonly principalUsdc6: bigint;
+  readonly maturityTsUnix: number;
+  readonly shares: number;
+  readonly setStage: (s: FormStage) => void;
+  readonly writeContractAsync: ReturnType<typeof useWriteContract>["writeContractAsync"];
+}
+
+/**
+ * The real borrow path. Five steps, each surfaced as a stage in the
+ * modal so the user knows what's happening:
+ *   1. Ensure VantaVault recognises the borrower (one-shot register).
+ *   2. User signs cTF.safeTransferFrom on Polygon → tokens land in
+ *      VantaVault, emitting a TransferSingle the runtime watches.
+ *   3. Wait for the runtime to sign a loan.pledge event citing the
+ *      transfer (SSE; up to ~30s with 6 confirmations).
+ *   4. POST /api/origination with the pledgeEventId → real
+ *      LoanBook.originate broadcast on Base mainnet.
+ *   5. Surface the resulting loanId + tx hash.
+ */
+async function runRealBorrow(args: RealBorrowArgs): Promise<void> {
+  // 1. Register on VantaVault if needed.
+  args.setStage({ kind: "submitting", step: "checking borrower registration…" });
+  const statusRes = await fetch(
+    `/api/runtime/borrower/status?borrower=${args.borrower}`,
+  );
+  const statusBody = (await statusRes.json()) as
+    | { ok: true; registered: boolean }
+    | { error: string };
+  if (!("ok" in statusBody) || !statusBody.ok) {
+    throw new Error(
+      "borrower_status_failed: " + ("error" in statusBody ? statusBody.error : "unknown"),
+    );
+  }
+  if (!statusBody.registered) {
+    args.setStage({
+      kind: "submitting",
+      step: "registering wallet on vantavault (gas paid by tee)…",
+    });
+    const regRes = await fetch("/api/runtime/borrower/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ borrower: args.borrower }),
+    });
+    const regBody = (await regRes.json()) as
+      | { ok: true; alreadyRegistered: boolean; txHash?: string }
+      | { error: string; detail?: string };
+    if (!regRes.ok || !("ok" in regBody) || !regBody.ok) {
+      throw new Error(
+        "register_failed: " + ("error" in regBody ? regBody.error : "unknown"),
+      );
+    }
+    // Wait briefly so the Polygon node sees the registration before
+    // we ask the user to send tokens (ERC-1155 onReceived would
+    // revert if the registry hasn't caught up).
+    await new Promise((r) => setTimeout(r, 4_000));
+  }
+
+  // 2. User signs the CTF transfer on Polygon.
+  args.setStage({
+    kind: "submitting",
+    step: "sign cTF.safeTransferFrom in your wallet (polygon)…",
+  });
+  // Pledge ALL the user's shares of this position (6 decimals on the CTF).
+  const pledgeAmount = BigInt(Math.max(1, args.shares)) * 1_000_000n;
+  const txHash = await args.writeContractAsync({
+    address: POLYMARKET_CTF_ADDRESS,
+    abi: CTF_TRANSFER_ABI,
+    functionName: "safeTransferFrom",
+    args: [args.borrower, VANTA_VAULT_ADDRESS, BigInt(args.tokenId), pledgeAmount, "0x"],
+    chainId: POLYMARKET_CTF_CHAIN_ID,
+  });
+
+  // 3. Wait for the runtime to sign a loan.pledge event citing this tx.
+  args.setStage({
+    kind: "submitting",
+    step: "waiting for tee to sign loan.pledge (up to 30s)…",
+  });
+  const pledgeEventId = await waitForPledgeEvent({
+    borrower: args.borrower,
+    txHash,
+    timeoutMs: 90_000,
+  });
+  if (pledgeEventId === null) {
+    throw new Error(
+      "pledge_event_timeout: tee didn't see vantavault transfer within 90s",
+    );
+  }
+
+  // 4. Real origination on Base mainnet.
+  args.setStage({
+    kind: "submitting",
+    step: "submitting to /api/origination (loanbook on base)…",
+  });
+  const origRes = await fetch("/api/runtime/origination", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      pledgeEventId,
+      positionId: args.tokenId,
+      requestedPrincipalCapUsdc6: args.principalUsdc6.toString(),
+      maturityTs: args.maturityTsUnix,
+    }),
+  });
+  const origBody = (await origRes.json()) as
+    | {
+        loanId: string;
+        txHash: string;
+        blockNumber: number;
+        haircutBps: number;
+        principalUsdc6: string;
+      }
+    | { error: string };
+  if (!origRes.ok || "error" in origBody) {
+    throw new Error("origination_failed: " + ("error" in origBody ? origBody.error : "unknown"));
+  }
+
+  args.setStage({
+    kind: "submitted",
+    loanId: origBody.loanId,
+    principalUsdc6: origBody.principalUsdc6,
+    haircutBps: origBody.haircutBps,
+    real: true,
+    txHash: origBody.txHash,
+  });
+}
+
+interface WaitArgs {
+  readonly borrower: `0x${string}`;
+  readonly txHash: `0x${string}`;
+  readonly timeoutMs: number;
+}
+
+/**
+ * Open a fresh SSE subscription and resolve when a loan.pledge event
+ * arrives whose body cites our pledge tx hash. Falls back to scanning
+ * recent events via /api/events in case the SSE connection drops.
+ */
+async function waitForPledgeEvent(args: WaitArgs): Promise<string | null> {
+  const deadline = Date.now() + args.timeoutMs;
+  const txLower = args.txHash.toLowerCase();
+  const borrowerLower = args.borrower.toLowerCase();
+
+  return new Promise<string | null>((resolve) => {
+    const stream = sseStream();
+    let settled = false;
+    const finish = (id: string | null): void => {
+      if (settled) return;
+      settled = true;
+      off();
+      clearInterval(poller);
+      resolve(id);
+    };
+    const off = stream.subscribe((e) => {
+      if (e.type !== "loan.pledge") return;
+      const body = (e as { body?: Record<string, unknown> }).body;
+      if (!body) return;
+      const tx = String(body["tx_hash"] ?? "").toLowerCase();
+      const bp = String(body["borrower_proxy"] ?? "").toLowerCase();
+      if (tx === txLower && bp === borrowerLower) finish(e.id);
+    });
+    // Polling fallback for the case where the event landed before
+    // subscribe resolved or the SSE socket flapped.
+    const poller = setInterval(async () => {
+      if (Date.now() > deadline) {
+        finish(null);
+        return;
+      }
+      try {
+        const r = await fetch("/api/runtime/events?limit=50");
+        const j = (await r.json()) as { events?: { id: string; type: string; body?: Record<string, unknown> }[] };
+        for (const ev of j.events ?? []) {
+          if (ev.type !== "loan.pledge") continue;
+          const tx = String(ev.body?.["tx_hash"] ?? "").toLowerCase();
+          const bp = String(ev.body?.["borrower_proxy"] ?? "").toLowerCase();
+          if (tx === txLower && bp === borrowerLower) {
+            finish(ev.id);
+            return;
+          }
+        }
+      } catch {
+        /* ignore — SSE may still deliver */
+      }
+    }, 4_000);
+  });
 }

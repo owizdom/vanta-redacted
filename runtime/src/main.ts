@@ -50,6 +50,7 @@ import { registerServiceRoutes } from "./http/routes/services.js";
 import { registerStateRoute } from "./http/routes/state.js";
 import { registerDevProbeRoute } from "./http/routes/dev-probe.js";
 import { registerAdminDeployRoutes } from "./http/routes/admin-deploy.js";
+import { registerBorrowerRoute } from "./http/routes/borrower.js";
 import { registerBridgeRoutes } from "./http/routes/bridge.js";
 import { registerAgentsRoutes } from "./http/routes/agents.js";
 import {
@@ -61,6 +62,7 @@ import {
   createMinimalLpVaultReader,
   type PoolReader,
 } from "./services/pool-reader.js";
+import { createPledgeWatcher, type PledgeWatcher } from "./services/pledge-watcher.js";
 import { createFleetHost, type FleetHost } from "./services/fleet-host.js";
 import {
   adaptInferenceClient,
@@ -282,6 +284,15 @@ async function startMain(): Promise<void> {
     walletClient: boot.walletClient,
     publicClient: boot.publicClient,
     adminPrivateKey: boot.origination.privateKey,
+  });
+  await registerBorrowerRoute(app, {
+    polygonClient: amoyClient,
+    polygonChainId: config.amoyChainId,
+    polygonRpcUrl: config.amoyRpcUrl,
+    vantaVaultAddress: config.vantaVaultAddress,
+    polymarketCtfAddress: config.polymarketCtfAddress,
+    adminPrivateKey: boot.origination.privateKey,
+    marketsCache: boot.marketsCache,
   });
 
   // v3 multi-VANTA marketplace surface. The fixture reader seeds three
@@ -603,6 +614,27 @@ async function startMain(): Promise<void> {
   boot.agentState.start();
   boot.marketsCache.start();
 
+  // Polygon CTF pledge watcher — turns real on-chain pledges into
+  // signed loan.pledge events the borrower can cite to /api/origination.
+  const pledgeWatcher: PledgeWatcher = createPledgeWatcher({
+    polygonClient: amoyClient,
+    ctfAddress: config.polymarketCtfAddress,
+    vantaVaultAddress: config.vantaVaultAddress,
+    events: ctx.events,
+    genesisId: ctx.genesisId,
+    marketsCache: boot.marketsCache,
+    log: {
+      info: (m) => app.log.info(m),
+      warn: (m) => app.log.warn(m),
+      error: (m) => app.log.error(m),
+    },
+  });
+  pledgeWatcher.start();
+  app.log.info(
+    { ctf: config.polymarketCtfAddress, vault: config.vantaVaultAddress },
+    "pledge_watcher_started",
+  );
+
   const reasoningLoops: readonly ReasoningLoop[] = [
     creditLoop,
     modelLoop,
@@ -653,6 +685,7 @@ async function startMain(): Promise<void> {
     try {
       boot.agentState.stop();
       boot.marketsCache.stop();
+      await pledgeWatcher.stop();
       await Promise.all(reasoningLoops.map((l) => l.stop()));
       await fleetHost.stop();
       await markLoop.stop();
