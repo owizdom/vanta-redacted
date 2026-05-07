@@ -20,13 +20,41 @@
 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import type { Hex, WalletClient, PublicClient } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  defineChain,
+  http,
+  type Hex,
+  type WalletClient,
+  type PublicClient,
+} from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+
+// Allowlist of supported chains for cross-chain deploys. Restricts the
+// route from sending requests to arbitrary RPCs.
+const SUPPORTED_CHAINS: Record<number, { name: string; defaultRpc: string }> = {
+  8453: { name: "base-mainnet", defaultRpc: "https://mainnet.base.org" },
+  84532: { name: "base-sepolia", defaultRpc: "https://sepolia.base.org" },
+  137: { name: "polygon-mainnet", defaultRpc: "https://polygon-rpc.com" },
+  80002: { name: "polygon-amoy", defaultRpc: "https://rpc-amoy.polygon.technology" },
+};
+
+const ChainOverride = z
+  .object({
+    chainId: z.number().int().refine((n) => n in SUPPORTED_CHAINS, {
+      message: "unsupported chainId",
+    }),
+    rpcUrl: z.string().url().optional(),
+  })
+  .strict();
 
 const DeployBody = z
   .object({
     bytecode: z.string().regex(/^0x[0-9a-fA-F]+$/, "must be 0x-prefixed hex"),
     value: z.string().regex(/^\d+$/).optional(),
     gasLimit: z.string().regex(/^\d+$/).optional(),
+    chain: ChainOverride.optional(),
   })
   .strict();
 
@@ -36,6 +64,7 @@ const SendTxBody = z
     data: z.string().regex(/^0x[0-9a-fA-F]*$/, "must be 0x-prefixed hex"),
     value: z.string().regex(/^\d+$/).optional(),
     gasLimit: z.string().regex(/^\d+$/).optional(),
+    chain: ChainOverride.optional(),
   })
   .strict();
 
@@ -44,8 +73,39 @@ export interface AdminDeployOpts {
   /** Required when enabled. Constant-time-compared against `X-Admin-Token`
    *  header on every request. Set via VANTA_DEPLOY_ADMIN_TOKEN env. */
   readonly token: string;
+  /** Default wallet/public clients (bound to LOAN_BOOK_RPC_URL +
+   *  LOAN_BOOK_CHAIN_ID). Used when the request body omits `chain`. */
   readonly walletClient: WalletClient;
   readonly publicClient: PublicClient;
+  /** Admin private key. When request body supplies a `chain` override,
+   *  we construct an ad-hoc wallet client on that chain using this key
+   *  so the runtime can deploy on any supported chain (Polygon mainnet
+   *  for VantaVault, etc) from the same TEE-derived admin EOA. */
+  readonly adminPrivateKey: Hex;
+}
+
+interface ChainClients {
+  readonly walletClient: WalletClient;
+  readonly publicClient: PublicClient;
+}
+
+function buildClientsForChain(
+  override: z.infer<typeof ChainOverride>,
+  privateKey: Hex,
+): ChainClients {
+  const meta = SUPPORTED_CHAINS[override.chainId]!;
+  const rpc = override.rpcUrl ?? meta.defaultRpc;
+  const chain = defineChain({
+    id: override.chainId,
+    name: meta.name,
+    nativeCurrency: { decimals: 18, name: "Native", symbol: override.chainId === 137 || override.chainId === 80002 ? "MATIC" : "ETH" },
+    rpcUrls: { default: { http: [rpc] } },
+  });
+  const transport = http(rpc);
+  const account = privateKeyToAccount(privateKey);
+  const walletClient = createWalletClient({ account, chain, transport });
+  const publicClient = createPublicClient({ chain, transport });
+  return { walletClient, publicClient };
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -92,8 +152,11 @@ export async function registerAdminDeployRoutes(
       return { error: "invalid_body", issues: parsed.error.issues };
     }
 
-    const { bytecode, value, gasLimit } = parsed.data;
-    const { walletClient, publicClient } = opts;
+    const { bytecode, value, gasLimit, chain: chainOverride } = parsed.data;
+    const { walletClient, publicClient } =
+      chainOverride === undefined
+        ? { walletClient: opts.walletClient, publicClient: opts.publicClient }
+        : buildClientsForChain(chainOverride, opts.adminPrivateKey);
     const account = walletClient.account;
     if (account === undefined) {
       void reply.code(500);
@@ -121,6 +184,7 @@ export async function registerAdminDeployRoutes(
         contractAddress: receipt.contractAddress,
         gasUsed: receipt.gasUsed.toString(),
         blockNumber: receipt.blockNumber.toString(),
+        chainId: walletClient.chain?.id,
       };
     } catch (err: unknown) {
       const e = err instanceof Error ? err : new Error(String(err));
@@ -139,8 +203,11 @@ export async function registerAdminDeployRoutes(
       return { error: "invalid_body", issues: parsed.error.issues };
     }
 
-    const { to, data, value, gasLimit } = parsed.data;
-    const { walletClient, publicClient } = opts;
+    const { to, data, value, gasLimit, chain: chainOverride } = parsed.data;
+    const { walletClient, publicClient } =
+      chainOverride === undefined
+        ? { walletClient: opts.walletClient, publicClient: opts.publicClient }
+        : buildClientsForChain(chainOverride, opts.adminPrivateKey);
     const account = walletClient.account;
     if (account === undefined) {
       void reply.code(500);

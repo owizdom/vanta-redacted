@@ -15,14 +15,15 @@ import {ILoanBook} from "./interfaces/ILoanBook.sol";
 /// @dev Invariants:
 ///        - I-LP-1: `totalAssets()` = idle USDC balance + LoanBook
 ///                  `outstandingPrincipal()` (when wired).
-///        - I-LP-2: asset is hard-pinned to canonical Base Sepolia USDC.
+///        - I-LP-2: asset is immutable for the lifetime of the vault —
+///                  set at construction, enforced by ERC4626's
+///                  `_asset` immutable. Deploy script is responsible
+///                  for passing the correct USDC for the target chain
+///                  (Sepolia 0x036C…CF7e, Base mainnet 0x8335…2913).
 ///        - I-LP-3: `_decimalsOffset() == 6` — virtual shares neutralise the
 ///                  classic ERC-4626 inflation attack.
 contract LpVault is ERC4626, Ownable2Step {
     using SafeERC20 for IERC20;
-
-    /// @notice Canonical Base Sepolia USDC.
-    address public constant BASE_SEPOLIA_USDC = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
 
     /// @notice Currently-wired LoanBook. `address(0)` while unwired.
     address public loanBook;
@@ -31,7 +32,6 @@ contract LpVault is ERC4626, Ownable2Step {
     ///         contract. Cleared on accept or on a fresh proposal.
     address public pendingLoanBook;
 
-    error BadAsset(address asset);
     error NotPendingLoanBook(address sender);
     error PendingLoanBookUnset();
     error NotLoanBook(address sender);
@@ -41,15 +41,14 @@ contract LpVault is ERC4626, Ownable2Step {
     event LoanBookAccepted(address indexed loanBook);
     event Drawn(address indexed to, uint256 amount);
 
-    /// @param asset_ Must equal `BASE_SEPOLIA_USDC` (I-LP-2).
+    /// @param asset_ The USDC contract for the deploy chain. Stored as
+    ///               immutable by ERC4626; cannot be changed post-deploy.
     /// @param admin_ Initial owner. Subject to `Ownable2Step` rotation rules.
     constructor(IERC20 asset_, address admin_)
         ERC20("VANTA LP", "vLP")
         ERC4626(asset_)
         Ownable(admin_)
-    {
-        if (address(asset_) != BASE_SEPOLIA_USDC) revert BadAsset(address(asset_));
-    }
+    {}
 
     // -----------------------------------------------------------------------
     // ERC-4626 overrides

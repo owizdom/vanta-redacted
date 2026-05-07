@@ -279,6 +279,7 @@ async function startMain(): Promise<void> {
     token: config.deployAdminToken,
     walletClient: boot.walletClient,
     publicClient: boot.publicClient,
+    adminPrivateKey: boot.origination.privateKey,
   });
 
   // v3 multi-VANTA marketplace surface. The fixture reader seeds three
