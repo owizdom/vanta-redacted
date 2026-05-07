@@ -79,6 +79,7 @@ import { createReplayDataset } from "./services/replay-dataset.js";
 import { installX402Hook, type X402RouteConfig } from "./services/x402.js";
 
 import { createAmbientReasoningLoop } from "./loops/ambient-reasoning.js";
+import { createSettlementWatchLoop } from "./loops/settlement-watch.js";
 import { createCreditLoop, type ActiveLoanView } from "./loops/credit.js";
 import { createModelLoop } from "./loops/model.js";
 import {
@@ -519,6 +520,23 @@ async function startMain(): Promise<void> {
     },
   });
 
+  // Settlement-watch loop — every 60s, walks the loan registry and
+  // emits a signed reasoning.trace event for any loan that has
+  // crossed maturity without being settled. Doesn't auto-settle on
+  // chain (V1) but makes the maturity event visible in the audit
+  // log so operators / auditors can act on it.
+  const settlementWatchLoop = createSettlementWatchLoop({
+    ctx,
+    loanRegistry: boot.loanRegistry,
+    clock: ctx.clock,
+    tickSeconds: 60,
+    log: {
+      info: (m) => app.log.info(m),
+      warn: (m) => app.log.warn(m),
+      error: (m) => app.log.error(m),
+    },
+  });
+
   // ----- Onboarding cycle (paper §6) -------------------------------------
   // Real Polymarket questions go through the LLM judge → resolution-
   // criteria clarity score → gate floor + agent reasoning → signed
@@ -641,6 +659,7 @@ async function startMain(): Promise<void> {
     operationalLoop,
     onboardingLoop,
     ambientReasoningLoop,
+    settlementWatchLoop,
   ];
   for (const loop of reasoningLoops) {
     loop.start();

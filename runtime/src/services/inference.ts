@@ -10,16 +10,17 @@
  *    Auth is per-call JWT minted via TEE attestation against
  *    `KMS_SERVER_URL` + `KMS_PUBLIC_KEY` (auto-injected inside EigenCompute);
  *    billed to the agent's own EigenCompute account. The agent self-funds
- *    inference end-to-end. As of 2026-05-02 this path returns
- *    `crypto/rsa: verification error` 401s on our sepolia-prod account —
- *    reproducible with `Layr-Labs/ecloud-inference-example` deployed
- *    unmodified — so the path is staged but inactive until Eigen ships a fix.
+ *    inference end-to-end. **Active on mainnet-alpha** with
+ *    `INFERENCE_AUDIENCE=llm-proxy` (the dev-cluster `vanta.app` audience
+ *    returned `crypto/rsa: verification error` 401s; mainnet-alpha
+ *    accepts `llm-proxy` and processes Anthropic / OpenAI / Google calls
+ *    through to the agent's KMS-attested account).
  *
  *  - `vercel` — Vercel AI Gateway, OpenAI-compatible. Auth is an operator-
  *    held bearer key (`VERCEL_AI_GATEWAY_KEY`). The operator pays Vercel
  *    in fiat downstream; the agent's inference spend is still bounded
  *    on chain by `VendorPayment(Inference)` weekly cap (immutable post-deploy).
- *    Default until the Eigen gateway is fixed.
+ *    Used as the local-dev fallback when KMS env vars are absent.
  *
  * Both backends use the same OpenAI-style model slugs (anthropic/...,
  * openai/..., google/...) so the canonical request and event shape is

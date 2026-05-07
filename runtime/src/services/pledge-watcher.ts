@@ -80,6 +80,27 @@ export function createPledgeWatcher(
     return null;
   };
 
+  // Wait until the chain is N blocks past the log. Polls block height
+  // every 4s; gives up after 4 minutes (60 polls). On timeout we drop
+  // the pledge — better to lose a maybe-orphaned event than to sign a
+  // pledge that never finalised.
+  const waitForConfirmations = async (logBlock: bigint): Promise<boolean> => {
+    const target = logBlock + BigInt(CONFIRMATIONS);
+    for (let attempt = 0; attempt < 60; attempt++) {
+      try {
+        const current = await opts.polygonClient.getBlockNumber();
+        if (current >= target) return true;
+      } catch (err) {
+        opts.log?.warn({
+          msg: "pledge_watcher_block_read_failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      await new Promise((r) => setTimeout(r, 4_000));
+    }
+    return false;
+  };
+
   const handleLog = async (log: Log): Promise<void> => {
     const txHash = log.transactionHash ?? "0x0";
     const logIndex = log.logIndex ?? 0;
@@ -108,6 +129,23 @@ export function createPledgeWatcher(
         from,
       });
       return;
+    }
+
+    // Wait for confirmations on Polygon before signing the pledge so a
+    // chain reorg can't orphan a loan.pledge event mid-flight. The
+    // confirmation_depth field on the event body now reflects an
+    // actual on-chain wait, not just metadata.
+    const logBlock = log.blockNumber ?? 0n;
+    if (logBlock > 0n) {
+      const confirmed = await waitForConfirmations(logBlock);
+      if (!confirmed) {
+        opts.log?.warn({
+          msg: "pledge_watcher_confirmation_timeout",
+          tx_hash: txHash,
+          block_number: Number(logBlock),
+        });
+        return;
+      }
     }
 
     const loanId = asSha256Hex(randomBytes(32).toString("hex"));
