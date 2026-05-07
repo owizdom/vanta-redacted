@@ -22,5 +22,7 @@ allow = [
   "gateway-api.polymarket.com",
   "mainnet.base.org",
   "polygon-rpc.com",
+  "polygon.llamarpc.com",
+  "polygon-bor-rpc.publicnode.com",
   "walrus.xyz",
 ]
