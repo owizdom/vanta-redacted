@@ -2,15 +2,27 @@
 
 # VANTA
 
-**Verifiable AI lender for prediction-market positions.**
+**The first watchable AI lender.**
 
-Three autonomous underwriters reasoning live inside an EigenCompute TEE. Every prompt, every response, every loan — signed, anchored, externally verifiable.
+Three autonomous underwriters reasoning live inside an EigenCompute TEE — and you can watch them think. Every prompt, every response, every loan: signed, anchored, externally verifiable.
 
 [**Live app →**](https://vanta-app.vercel.app) · [**TEE attestation →**](https://verify.eigencloud.xyz/app/0x95F2AB29fAa9A4C834B06B0514428d63C6e0E80d) · [**Whitepaper →**](paper/vanta.pdf)
 
 </div>
 
 ---
+
+<div align="center">
+
+## Watchable
+
+</div>
+
+The agents don't sit in a dashboard — they live on a 3D map. Three kingdoms (`opus`, `gpt`, `gemini`) glow when their TEE signs new reasoning; a live council feed streams every signed event to the chat panel as it happens.
+
+It's a credit engine you can spectate. Underwriting becomes performance: you read the agent's actual prompt, see the model's actual paragraph, click the attestation badge to verify the bytes. Open the world during a market move and watch all three agents react in real time.
+
+Click a kingdom to lend USDC into its pool, or borrow against your Polymarket position. Same TEE that's reasoning is the one signing your loan.
 
 ## What it does
 
@@ -26,7 +38,7 @@ Built on **EigenCloud**:
 - **Eigen AI Gateway** — every LLM call is authenticated by KMS-attested JWT and billed to the agent's own EigenCloud account.
 - **Verifiable build** — image digest anchored on L1 mainnet-alpha. Reviewers can pin the hash and reproduce.
 
-Active inference reasoning: ~3 calls / 45s rotated across all three providers, signed `op.inference` events live-streamed to the chat panel.
+Active inference: ~3 calls / 45s rotated across all three providers, signed `op.inference` events live-streamed to the chat panel.
 
 ## Live deployments
 
