@@ -100,16 +100,33 @@ export async function registerDevProbeRoute(
       q["prompt"] ??
       "Respond with the single word OK (no punctuation, no quotes).";
 
+    // Allow callers to override the system prompt. Default keeps
+    // backwards-compatible "connectivity probe" behaviour for any
+    // existing one-shot tests, but the heartbeat passes a real
+    // underwriter persona so the chat panel surfaces full reasoning,
+    // not single-word probe replies.
+    const systemText =
+      q["system"] ??
+      "You are a connectivity probe. Respond with exactly what the user asks for, nothing else.";
+
+    // Optional max_tokens override (16 ≤ N ≤ 4096). Reasoning models
+    // (GPT-5, Gemini 2.5 Pro) burn most tokens on hidden chain-of-
+    // thought so callers needing visible paragraphs should request
+    // 1024+. Anything <16 or unparseable falls back to 256.
+    const maxTokensQ = q["max_tokens"];
+    const parsedMax =
+      maxTokensQ !== undefined ? Number.parseInt(maxTokensQ, 10) : 256;
+    const maxTokens = Number.isFinite(parsedMax)
+      ? Math.min(4096, Math.max(16, parsedMax))
+      : 256;
+
     const t0 = Date.now();
     try {
       const baseReq = {
         role: "researcher" as const,
-        system: "You are a connectivity probe. Respond with exactly what the user asks for, nothing else.",
+        system: systemText,
         messages: [{ role: "user" as const, content: promptText }],
-        // 256 to give reasoning-mode providers (GPT-5, Gemini 2.5 Pro)
-        // headroom for hidden chain-of-thought + visible output.
-        // 16 starved them — they emitted 0 visible tokens.
-        maxTokens: 256,
+        maxTokens,
         temperature: 0,
       };
       const r = await opts.inference.call(
