@@ -75,6 +75,7 @@ import {
 import { createReplayDataset } from "./services/replay-dataset.js";
 import { installX402Hook, type X402RouteConfig } from "./services/x402.js";
 
+import { createAmbientReasoningLoop } from "./loops/ambient-reasoning.js";
 import { createCreditLoop, type ActiveLoanView } from "./loops/credit.js";
 import { createModelLoop } from "./loops/model.js";
 import {
@@ -460,6 +461,21 @@ async function startMain(): Promise<void> {
     tickSeconds: 60 * 60,
   });
 
+  // Ambient reasoning loop — keeps the chat panel alive with live
+  // signed underwriting analysis on real Polymarket markets, rotated
+  // across opus / gpt / gemini. Runs entirely in-TEE; no external
+  // poker required.
+  const ambientReasoningLoop = createAmbientReasoningLoop({
+    inference: boot.inference,
+    marketsCache: boot.marketsCache,
+    clock: ctx.clock,
+    tickSeconds: 45,
+    log: {
+      info: (m) => app.log.info(m),
+      error: (m) => app.log.error(m),
+    },
+  });
+
   // ----- Onboarding cycle (paper §6) -------------------------------------
   // Real Polymarket questions go through the LLM judge → resolution-
   // criteria clarity score → gate floor + agent reasoning → signed
@@ -560,6 +576,7 @@ async function startMain(): Promise<void> {
     modelLoop,
     operationalLoop,
     onboardingLoop,
+    ambientReasoningLoop,
   ];
   for (const loop of reasoningLoops) {
     loop.start();
