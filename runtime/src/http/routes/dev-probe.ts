@@ -106,7 +106,10 @@ export async function registerDevProbeRoute(
         role: "researcher" as const,
         system: "You are a connectivity probe. Respond with exactly what the user asks for, nothing else.",
         messages: [{ role: "user" as const, content: promptText }],
-        maxTokens: 16,
+        // 256 to give reasoning-mode providers (GPT-5, Gemini 2.5 Pro)
+        // headroom for hidden chain-of-thought + visible output.
+        // 16 starved them — they emitted 0 visible tokens.
+        maxTokens: 256,
         temperature: 0,
       };
       const r = await opts.inference.call(
