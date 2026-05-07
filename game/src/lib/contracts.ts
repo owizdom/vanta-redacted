@@ -57,6 +57,22 @@ export function explorerTxUrl(txHash: string): string {
   return `https://${host}/tx/${txHash}`;
 }
 
+/**
+ * Polymarket Conditional Token Framework — the ERC-1155 the user
+ * actually holds when they buy YES/NO shares on Polymarket. We
+ * read `balanceOf(user, tokenId)` here so the borrow modal can
+ * surface the user's real positions instead of fabricated shares.
+ */
+export const POLYMARKET_CTF_ADDRESS: Address = IS_MAINNET
+  ? "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
+  : "0x69308FB512518e39F9b16112fA8d994F4e2Bf8bB";
+
+export const POLYMARKET_CTF_CHAIN_ID = IS_MAINNET ? 137 : 80002;
+
+export const ERC1155_BALANCE_OF_ABI = parseAbi([
+  "function balanceOf(address account, uint256 id) view returns (uint256)",
+]);
+
 /** Convert a string like "5.0" → 5_000_000n (6-decimal USDC wei). */
 export function parseUsdcInput(input: string): bigint | null {
   const trimmed = input.trim();

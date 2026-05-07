@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useReadContracts } from "wagmi";
 
 import type { Kingdom } from "../lib/kingdoms";
 import {
-  marketsForAgent,
+  ERC1155_BALANCE_OF_ABI,
+  POLYMARKET_CTF_ADDRESS,
+  POLYMARKET_CTF_CHAIN_ID,
+} from "../lib/contracts";
+import {
+  marketsForAgentFromList,
+  useRealMarkets,
   type DemoMarket,
 } from "../lib/markets";
 import { sseStream, type ReasoningEvent } from "../lib/stream";
@@ -23,10 +29,12 @@ type FormStage =
 
 interface PortfolioPosition {
   readonly market: DemoMarket;
-  /** CTF shares the user "owns" — synthetic for the demo. */
+  /** CTF shares actually held in the user's wallet (or synthetic). */
   readonly shares: number;
   /** Per-share entry price they paid (usually mid +/- a tiny premium). */
   readonly entryPrice: number;
+  /** True when read from Polymarket CTF on Polygon; false for demo fallback. */
+  readonly real: boolean;
 }
 
 /**
@@ -61,18 +69,77 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
   const { address, isConnected } = useAccount();
   const [stage, setStage] = useState<FormStage>({ kind: "input" });
 
-  // Synthetic portfolio: 3-4 positions matching the agent's kingdom
-  // thesis. Generated deterministically from the kingdom + wallet so
-  // the same demo replays consistently.
+  // Live markets the runtime is actually watching right now.
+  const { markets: liveMarkets, loading: marketsLoading, error: marketsError } =
+    useRealMarkets();
+
+  const themedMarkets = useMemo(
+    () => marketsForAgentFromList(kingdom.agentId, liveMarkets).slice(0, 4),
+    [kingdom.agentId, liveMarkets],
+  );
+
+  // Real Polymarket CTF balance reads on Polygon mainnet. We multicall
+  // `balanceOf(user, tokenId)` for each themed market's tokenId so the
+  // borrow modal surfaces the wallet's ACTUAL CTF holdings instead of
+  // fabricated share counts.
+  const balanceContracts = useMemo(
+    () =>
+      address !== undefined
+        ? themedMarkets.map((m) => ({
+            address: POLYMARKET_CTF_ADDRESS,
+            abi: ERC1155_BALANCE_OF_ABI,
+            functionName: "balanceOf" as const,
+            args: [address, BigInt(m.tokenId)] as const,
+            chainId: POLYMARKET_CTF_CHAIN_ID,
+          }))
+        : [],
+    [address, themedMarkets],
+  );
+
+  const balancesQuery = useReadContracts({
+    contracts: balanceContracts,
+    query: { enabled: balanceContracts.length > 0 },
+  });
+
+  const realBalances = useMemo<readonly bigint[]>(() => {
+    if (!balancesQuery.data) return [];
+    return balancesQuery.data.map((r) =>
+      r.status === "success" && typeof r.result === "bigint" ? r.result : 0n,
+    );
+  }, [balancesQuery.data]);
+
+  // Build the portfolio: prefer real on-chain balances; fall back to
+  // a synthetic sample only when the wallet holds no CTF positions in
+  // the watched set. The synthetic fallback is clearly labeled "demo"
+  // so users always know which path they're on.
   const portfolio = useMemo<readonly PortfolioPosition[]>(() => {
-    const markets = marketsForAgent(kingdom.agentId);
-    return markets.slice(0, 3).map((m, i) => {
+    const real: PortfolioPosition[] = [];
+    themedMarkets.forEach((m, i) => {
+      const raw = realBalances[i] ?? 0n;
+      // CTF tokens are 6-decimal (USDC-equivalent shares).
+      const shares = Number(raw / 1_000_000n);
+      if (shares > 0) {
+        real.push({
+          market: m,
+          shares,
+          entryPrice: m.currentMid,
+          real: true,
+        });
+      }
+    });
+    if (real.length > 0) return real;
+
+    // Demo fallback so the modal stays interactive when the connected
+    // wallet has no Polymarket positions in the watched set.
+    return themedMarkets.map((m, i) => {
       const sharesByIdx = [2400, 1500, 950, 3200];
       const shares = sharesByIdx[i] ?? 1000;
       const entryPrice = Math.max(0.02, m.currentMid - 0.02 + i * 0.005);
-      return { market: m, shares, entryPrice };
+      return { market: m, shares, entryPrice, real: false };
     });
-  }, [kingdom.agentId]);
+  }, [themedMarkets, realBalances]);
+
+  const hasRealPositions = portfolio.some((p) => p.real);
 
   const [selectedIdx, setSelectedIdx] = useState<number>(0);
   const [principalUsdc, setPrincipalUsdc] = useState("500");
@@ -272,6 +339,40 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
               You keep the upside; <span className="text-chalk-200">{kingdom.displayName}</span> lends
               you USDC against the current value (haircut {(HAIRCUT_BPS / 100).toFixed(0)}%).
             </p>
+            {address !== undefined ? (
+              hasRealPositions ? (
+                <div className="mb-3 rounded-[2px] border border-signal-green/40 bg-signal-green/5 p-2 font-mono text-[10px] uppercase tracking-[0.18em] text-signal-green">
+                  ● live positions read from polymarket on polygon
+                </div>
+              ) : (
+                <div className="mb-3 rounded-[2px] border border-ink-700 bg-ink-900/85 p-2 font-mono text-[10px] text-chalk-400">
+                  no polymarket positions found on{" "}
+                  <span className="text-chalk-200">{address.slice(0, 6)}…{address.slice(-4)}</span>{" "}
+                  for these markets — showing a demo portfolio so you can see
+                  the council flow.{" "}
+                  <a
+                    href="https://polymarket.com/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-chalk-200 underline"
+                  >
+                    buy yes/no shares ↗
+                  </a>
+                </div>
+              )
+            ) : null}
+            {marketsLoading && portfolio.length === 0 ? (
+              <div className="rounded-[2px] border border-ink-700 bg-ink-900/85 p-3 font-mono text-[10px] text-chalk-500">
+                loading live markets from runtime…
+              </div>
+            ) : null}
+            {!marketsLoading && portfolio.length === 0 ? (
+              <div className="rounded-[2px] border border-ink-700 bg-ink-900/85 p-3 font-mono text-[10px] text-chalk-500">
+                {marketsError !== null
+                  ? `runtime markets unreachable: ${marketsError}`
+                  : "no live markets available right now."}
+              </div>
+            ) : null}
             <div className="space-y-2">
               {portfolio.map((p, i) => {
                 const value = p.shares * p.market.currentMid;
@@ -296,7 +397,7 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
                     <div className="font-mono text-[11px] text-chalk-100 leading-snug">
                       {p.market.question}
                     </div>
-                    <div className="mt-1.5 flex items-center gap-3 font-mono text-[10px] text-chalk-400">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-2 font-mono text-[10px] text-chalk-400">
                       <span style={{ color: kingdom.color }}>
                         {p.market.side} @ {p.market.currentMid.toFixed(2)}
                       </span>
@@ -306,6 +407,15 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
                       <span className="text-chalk-200">
                         ${value.toLocaleString(undefined, { maximumFractionDigits: 0 })} value
                       </span>
+                      {p.real ? (
+                        <span className="rounded-[2px] border border-signal-green/40 px-1.5 py-px text-[8px] uppercase tracking-[0.2em] text-signal-green">
+                          live
+                        </span>
+                      ) : (
+                        <span className="rounded-[2px] border border-ink-600 px-1.5 py-px text-[8px] uppercase tracking-[0.2em] text-chalk-500">
+                          demo
+                        </span>
+                      )}
                     </div>
                   </button>
                 );

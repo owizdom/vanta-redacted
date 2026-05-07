@@ -58,6 +58,7 @@ import {
 } from "./services/agent-registry-reader.js";
 import {
   createFixturePoolReader,
+  createMinimalLpVaultReader,
   type PoolReader,
 } from "./services/pool-reader.js";
 import { createFleetHost, type FleetHost } from "./services/fleet-host.js";
@@ -292,11 +293,42 @@ async function startMain(): Promise<void> {
   // `{pools: [{agent_id, nav_usdc6, ...}, ...]}`, we replace the zero
   // defaults with those values per agent. Used by `scripts/demo/seed-onchain.ts`
   // so the demo's marketplace + agent detail card render lived-in TVL.
-  const v3Registry = createFixtureRegistryReader(DEFAULT_FIXTURE_AGENTS);
+  // Prod wiring: when a real LpVault address is configured, route all
+  // three fixture agents to that single shared pool. Until per-agent
+  // AgentPoolVault contracts are deployed, the three kingdoms share
+  // one on-chain pool — that is the actual deployed architecture, so
+  // expose it honestly to the frontend (deposits land at a real
+  // contract, /api/agents/:id surfaces the real address, the
+  // marketplace card reads live `totalAssets` via viem).
+  const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
+  const realLpVault = (config.lpVaultAddress !== ZERO_ADDR
+    ? config.lpVaultAddress
+    : null) as `0x${string}` | null;
+  const fixtureAgents = realLpVault
+    ? DEFAULT_FIXTURE_AGENTS.map((a) => ({ ...a, pool: realLpVault }))
+    : DEFAULT_FIXTURE_AGENTS;
+
+  const v3Registry = createFixtureRegistryReader(fixtureAgents);
   const demoPools = loadDemoPoolOverrides();
   const v3PoolReaders = new Map<number, PoolReader>();
-  for (const agent of DEFAULT_FIXTURE_AGENTS) {
+  for (const agent of fixtureAgents) {
     const override = demoPools.get(agent.agent_id);
+    if (realLpVault && override === undefined) {
+      // Live on-chain reader — totalAssets() + totalSupply() against
+      // the real LpVault on Base. The shared-pool means all three
+      // agents read the same contract; a deposit anywhere shows up
+      // in everyone's TVL stat.
+      v3PoolReaders.set(
+        agent.agent_id,
+        createMinimalLpVaultReader({
+          client: boot.publicClient,
+          agent_id: agent.agent_id,
+          pool: agent.pool,
+          position_book: agent.position_book,
+        }),
+      );
+      continue;
+    }
     v3PoolReaders.set(
       agent.agent_id,
       createFixturePoolReader({

@@ -109,6 +109,56 @@ export interface ViemPoolReaderArgs {
   readonly position_book: Address;
 }
 
+/**
+ * Reader for a vanilla ERC-4626 LpVault that does NOT have the
+ * `maxAumUsdc6` / position-book extensions. Reads `totalAssets()`
+ * and `totalSupply()` live on every call; returns 0 for the
+ * extension-only fields. Used by the prod runtime when the only
+ * deployed contract is the shared LpVault on Base mainnet — the
+ * full per-agent vault layout is V1 work.
+ */
+export interface MinimalLpVaultReaderArgs {
+  readonly client: PublicClient;
+  readonly agent_id: number;
+  readonly pool: Address;
+  readonly position_book: Address;
+  readonly maxAumUsdc6?: bigint;
+}
+
+export function createMinimalLpVaultReader(
+  args: MinimalLpVaultReaderArgs,
+): PoolReader {
+  const maxAum = args.maxAumUsdc6 ?? 10_000_000_000_000n;
+  const read = async (): Promise<PoolState> => {
+    const [nav, supply] = (await Promise.all([
+      args.client.readContract({
+        address: args.pool,
+        abi: POOL_ABI,
+        functionName: "totalAssets",
+      }),
+      args.client.readContract({
+        address: args.pool,
+        abi: POOL_ABI,
+        functionName: "totalSupply",
+      }),
+    ])) as [bigint, bigint];
+    return {
+      agent_id: args.agent_id,
+      pool: args.pool,
+      position_book: args.position_book,
+      nav_usdc6: nav,
+      total_supply: supply,
+      share_price_e18: computeSharePriceE18(nav, supply),
+      max_aum_usdc6: maxAum,
+      free_usdc6: computeFreeUsdc6(nav, 0n),
+      open_notional_usdc6: 0n,
+      lifetime_cost_basis_usdc6: 0n,
+      lifetime_proceeds_usdc6: 0n,
+    };
+  };
+  return { read };
+}
+
 export function createViemPoolReader(args: ViemPoolReaderArgs): PoolReader {
   const read = async (): Promise<PoolState> => {
     const [nav, supply, maxAum, openNotional, lifeCost, lifeProceeds] = (await Promise.all([
