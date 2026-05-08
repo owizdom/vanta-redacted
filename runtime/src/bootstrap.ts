@@ -14,6 +14,11 @@
  *   6. Read `LoanBook.owner()` via viem and assert it equals the
  *      derived EOA (I-RT-2). Hard-fail on mismatch — the runtime
  *      cannot drive originate/markRepaid/markLiquidated otherwise.
+ *   7. Assert the live KMS JWT's `app_id` claim matches the configured
+ *      `EXPECTED_APP_ID` and/or the `versions.json` `kms.appId` pin
+ *      (I-RT-3 + I-RT-4). Closes the "right contracts, wrong appId"
+ *      drift class — a runtime that boots against another app's KMS
+ *      with the wrong appId fails closed before the HTTP surface is up.
  *
  * Returns a struct of long-lived handles the rest of the runtime
  * needs (TEE state, event log, derived EOA + privateKey, viem
@@ -149,6 +154,10 @@ const LOAN_BOOK_FEE_ABI = [
 const DEFAULT_ORIGINATION_FEE_BPS = 50;
 
 export interface Bootstrap {
+  /** Validated runtime config — exposed so chain-aware routes (identity-pin,
+   *  bridge, etc.) read pinned addresses from a single source of truth
+   *  rather than re-importing env or rehardcoding constants. */
+  readonly config: RuntimeConfig;
   readonly tee: TeeState;
   readonly log: FileEventLog;
   readonly origination: {
@@ -157,7 +166,7 @@ export interface Bootstrap {
   };
   /**
    * vanta-agent-treasury-v1 — HKDF-derived secp256k1 account on Base
-   * Sepolia. Receiver of X402 micropayments + origination fees;
+   * mainnet. Receiver of X402 micropayments + origination fees;
    * spec-pinned distinct from `origination` so a metering breach can't
    * mint loans. The walletClient signs treasury-side outflows
    * (Uniswap gas refills, VendorPayment.pay) — the only EOA that may
@@ -285,25 +294,64 @@ function loadKmsPin(): {
   return { appId: null, publicKeySha256: null };
 }
 
-function assertKmsPinMatches(tee: TeeState): void {
+/**
+ * Decode the unverified `app_id` claim from a JWS-compact JWT. We only
+ * read the second segment (the payload) because by the time we reach
+ * this code path the KMS has already signed the JWT and the SDK has
+ * verified the signature against the KMS public key (init.ts step 4).
+ * We're cross-checking the *claim*, not the signature.
+ */
+function unsafeReadAppIdFromJwt(jwt: string): string | null {
+  const parts = jwt.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const pad = "=".repeat((4 - (parts[1]!.length % 4)) % 4);
+    const json = Buffer.from(parts[1]! + pad, "base64url").toString("utf8");
+    const obj = JSON.parse(json) as { app_id?: unknown };
+    return typeof obj.app_id === "string" ? obj.app_id.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the live appId regardless of anchor kind. For `kms-jwt`,
+ * decode it from the JWT payload (verified by the SDK upstream); for
+ * `eigencompute-instance`, read the instanceId we were configured with.
+ */
+function resolveLiveAppId(tee: TeeState): string | null {
+  const anchor = tee.identityAnchor;
+  if (anchor === null) return null;
+  if (anchor.kind === "kms-jwt") {
+    return unsafeReadAppIdFromJwt(anchor.jwt);
+  }
+  return anchor.instanceId.toLowerCase();
+}
+
+function assertKmsPinMatches(tee: TeeState, expectedAppId: string | null): void {
   const pin = loadKmsPin();
-  if (pin.publicKeySha256 === null && pin.appId === null) return;
+  // Combined appId pin: env (EXPECTED_APP_ID) takes precedence over
+  // versions.json. Either is enough to enforce; both unset means I-RT-3
+  // / I-RT-4 are inactive (caller should set at least one in prod).
+  const pinnedAppId =
+    expectedAppId !== null ? expectedAppId.toLowerCase() : pin.appId?.toLowerCase() ?? null;
+
+  if (pin.publicKeySha256 === null && pinnedAppId === null) return;
 
   const anchor = tee.identityAnchor;
   if (anchor === null) {
     throw new TeeError(
       "env_not_configured",
-      "I-RT-3 violation: kms pin set in versions.json but identityAnchor is null",
+      "I-RT-3/4 violation: kms or appId pin set but identityAnchor is null",
     );
   }
 
   if (pin.publicKeySha256 !== null) {
-    const livePem = anchor.kind === "kms-jwt"
-      ? anchor.kmsPublicKeyPem
-      : anchor.kmsPublicKeyPem;
-    const liveHash = livePem === null
-      ? null
-      : createHash("sha256").update(livePem, "utf8").digest("hex");
+    const livePem = anchor.kmsPublicKeyPem;
+    const liveHash =
+      livePem === null
+        ? null
+        : createHash("sha256").update(livePem, "utf8").digest("hex");
     if (liveHash !== pin.publicKeySha256) {
       throw new TeeError(
         "env_not_configured",
@@ -316,14 +364,23 @@ function assertKmsPinMatches(tee: TeeState): void {
     }
   }
 
-  if (pin.appId !== null && anchor.kind === "eigencompute-instance") {
-    if (anchor.instanceId !== pin.appId) {
+  if (pinnedAppId !== null) {
+    const liveAppId = resolveLiveAppId(tee);
+    if (liveAppId === null) {
       throw new TeeError(
         "env_not_configured",
-        "I-RT-3 violation: EigenCompute instanceId does not match versions.json appId pin",
+        "I-RT-4 violation: appId pin set but live anchor exposes no app_id (JWT payload missing app_id?)",
+        { expected: pinnedAppId, anchor_kind: anchor.kind },
+      );
+    }
+    if (liveAppId !== pinnedAppId) {
+      throw new TeeError(
+        "env_not_configured",
+        "I-RT-4 violation: live KMS app_id does not match expected pin — refusing to start",
         {
-          expected: pin.appId,
-          observed: anchor.instanceId,
+          expected: pinnedAppId,
+          observed: liveAppId,
+          anchor_kind: anchor.kind,
         },
       );
     }
@@ -705,8 +762,9 @@ export async function bootstrap(config: RuntimeConfig): Promise<Bootstrap> {
 
   const tee = await initTEE();
 
-  // I-RT-3: KMS pin check (no-op when versions.json carries no pin).
-  assertKmsPinMatches(tee);
+  // I-RT-3 + I-RT-4: KMS pubkey + appId pin check (no-op when neither
+  // versions.json carries a pin nor EXPECTED_APP_ID is set).
+  assertKmsPinMatches(tee, config.expectedAppId);
 
   // Step 4: open the log.
   const log = new FileEventLog(config.dataDir);
@@ -721,9 +779,14 @@ export async function bootstrap(config: RuntimeConfig): Promise<Bootstrap> {
     });
   }
   // Step 6: viem clients + on-chain owner check (I-RT-2).
-  const baseSepoliaLocal = defineChain({
+  const loanBookChain = defineChain({
     id: config.loanBookChainId,
-    name: config.loanBookChainId === 8453 ? "base-mainnet" : "base-sepolia-local",
+    name:
+      config.loanBookChainId === 8453
+        ? "base-mainnet"
+        : config.loanBookChainId === 84532
+          ? "base-sepolia"
+          : "base-local",
     nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
     rpcUrls: {
       default: { http: [config.loanBookRpcUrl] },
@@ -732,12 +795,12 @@ export async function bootstrap(config: RuntimeConfig): Promise<Bootstrap> {
   const transport = http(config.loanBookRpcUrl);
   const account = privateKeyToAccount(origination.privateKey);
   const publicClient = createPublicClient({
-    chain: baseSepoliaLocal,
+    chain: loanBookChain,
     transport,
   });
   const walletClient = createWalletClient({
     account,
-    chain: baseSepoliaLocal,
+    chain: loanBookChain,
     transport,
   });
   // Treasury walletClient — same chain + transport as origination, but
@@ -746,7 +809,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Bootstrap> {
   const treasuryAccount = privateKeyToAccount(treasury.privateKey);
   const treasuryWalletClient = createWalletClient({
     account: treasuryAccount,
-    chain: baseSepoliaLocal,
+    chain: loanBookChain,
     transport,
   });
 
@@ -831,6 +894,7 @@ export async function bootstrap(config: RuntimeConfig): Promise<Bootstrap> {
   const marketsCache = createMarketsCache();
 
   return {
+    config,
     tee,
     log,
     origination,

@@ -6,11 +6,10 @@
  *   MADE SOVEREIGN WITH  [EigenCloud logo →]
  *   Saturday, May 2, 2026 · 07:40:36 AM
  *
- * The whole row is a link to VANTA's deployed-app attestation page
- * on the EigenCloud Sepolia verifier. Identity values (image hash,
- * genesis, KMS, etc.) live on the AgentBand's bottom meta strip on
- * /app — this chip is just the trust handoff to a third-party
- * verifier.
+ * The whole row is a link to VANTA's deployed-app attestation page on
+ * the EigenCloud mainnet verifier. Identity values (image hash, genesis,
+ * KMS, etc.) live on the AgentBand's bottom meta strip on /app — this
+ * chip is just the trust handoff to a third-party verifier.
  *
  * Hidden below `md` so the top nav doesn't get crammed.
  */
@@ -18,7 +17,7 @@
 import { useEffect, useState } from "react";
 
 const VERIFY_URL =
-  "https://verify-sepolia.eigencloud.xyz/app/0x98Ff56d84B31F44DacB4688828Dc19CD85393033";
+  "https://verify.eigencloud.xyz/app/0x95F2AB29fAa9A4C834B06B0514428d63C6e0E80d";
 
 export function MadeSovereignWith(): JSX.Element {
   // Empty on first paint to avoid an SSR/client hydration mismatch on

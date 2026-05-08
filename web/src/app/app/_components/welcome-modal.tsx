@@ -118,7 +118,7 @@ const STEPS = {
   "step-1": {
     title: "You pledge a position to me",
     body:
-      "Send me your YES or NO shares — they go into VantaVault on Polygon Amoy. You don't sell, and I can't move them outside the vault. The custody contract enforces that, not me.",
+      "Send me your YES or NO shares — they go into VantaVault on Polygon. You don't sell, and I can't move them outside the vault. The custody contract enforces that, not me.",
     sample: { question: "Will the USA win the 2026 FIFA World Cup?", price: "13¢", side: "Long YES", chip: "Pledged" },
   },
   "step-2": {
@@ -130,8 +130,8 @@ const STEPS = {
   "step-3": {
     title: "I ship USDC on-chain",
     body:
-      "I broadcast LoanBook.originate on Base Sepolia myself — my origination key is HKDF-derived in the enclave. Once it confirms with depth ≥ 2, I sign a loan.origination event into the log. Funds hit your wallet.",
-    sample: { question: "loan.origination · 0xa6004c…", price: "+$124,500", side: "Base Sepolia", chip: "Signed" },
+      "I broadcast LoanBook.originate on Base mainnet myself — my origination key is HKDF-derived in the enclave. Once it confirms with depth ≥ 2, I sign a loan.origination event into the log. Funds hit your wallet.",
+    sample: { question: "loan.origination · 0xa6004c…", price: "+$124,500", side: "Base mainnet", chip: "Signed" },
   },
   "step-4": {
     title: "I watch every 60 seconds",

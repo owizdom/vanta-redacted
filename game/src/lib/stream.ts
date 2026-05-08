@@ -26,7 +26,11 @@ export type ReasoningEventType =
   | "loan.mark"
   | "loan.settlement"
   | "loan.liquidation"
-  | "loop.credit_tick";
+  | "loop.credit_tick"
+  // raw inference + onboarding gate (rendered when no richer event
+  // is available — keeps the chat panel alive between full council passes)
+  | "op.inference"
+  | "loop.onboard_decision";
 
 /** Single entry in the chat panel — one signed event from one agent. */
 export interface ReasoningEvent {
@@ -61,6 +65,38 @@ export interface ReasoningStream {
 // ---------------------------------------------------------------------------
 // Real SSE stream
 // ---------------------------------------------------------------------------
+
+/**
+ * Fetch the most recent N runtime events and translate them into
+ * ReasoningEvents. Used to seed the chat panel on first paint so
+ * visitors see real activity immediately, even when the loops haven't
+ * ticked since the page loaded.
+ */
+export async function fetchRecentReasoning(
+  limit = 30,
+): Promise<readonly ReasoningEvent[]> {
+  try {
+    const root = import.meta.env.VITE_RUNTIME_URL ?? "/api/runtime";
+    const r = await fetch(`${root}/events?limit=${String(limit)}`, { cache: "no-store" });
+    if (!r.ok) return [];
+    const j = (await r.json()) as { events?: Array<{
+      id?: string;
+      type?: string;
+      timestamp?: number;
+      body?: Record<string, unknown>;
+    }> };
+    const out: ReasoningEvent[] = [];
+    for (const raw of j.events ?? []) {
+      const ev = translateRuntimeEvent(raw);
+      if (ev) out.push(ev);
+    }
+    // Runtime returns newest-first; flip to oldest-first so the panel
+    // appends in chronological order matching SSE delivery.
+    return out.reverse();
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Subscribe to /api/runtime/events/stream and translate each signed
@@ -114,6 +150,11 @@ const LEGACY_LOAN_TYPES = new Set<ReasoningEventType>([
   "loan.settlement",
   "loan.liquidation",
   "loop.credit_tick",
+  // Pre-multi-VANTA: op.inference + onboarding decisions don't carry
+  // agent_id either. Attribute to vanta-opus so they render under a
+  // kingdom colour. v3.5 wiring extends these schemas with agent_id.
+  "op.inference",
+  "loop.onboard_decision",
 ]);
 
 function translateRuntimeEvent(raw: {
@@ -131,6 +172,15 @@ function translateRuntimeEvent(raw: {
       : typeof body["agentId"] === "number"
         ? (body["agentId"] as number)
         : -1;
+  // op.inference doesn't carry agent_id but does carry provider —
+  // map it to the matching kingdom (anthropic→opus(0), openai→gpt(1),
+  // google→gemini(2)) so the chat panel colour-codes correctly.
+  if (agentId < 0 && t === "op.inference") {
+    const provider = typeof body["provider"] === "string" ? (body["provider"] as string) : "";
+    if (provider === "anthropic") agentId = 0;
+    else if (provider === "openai") agentId = 1;
+    else if (provider === "google") agentId = 2;
+  }
   if (agentId < 0 && LEGACY_LOAN_TYPES.has(t)) {
     agentId = 0;
   }
@@ -155,6 +205,8 @@ function translateRuntimeEvent(raw: {
     "loan.mark",
     "loan.settlement",
     "loan.liquidation",
+    "op.inference",
+    "loop.onboard_decision",
   ];
   if (!known.includes(t)) return null;
 
@@ -308,6 +360,35 @@ function translateRuntimeEvent(raw: {
         ? ` (${body["reason"] as string})`
         : ""
     }.`;
+  } else if (t === "op.inference") {
+    const provider =
+      typeof body["provider"] === "string" ? (body["provider"] as string) : "?";
+    const model =
+      typeof body["model"] === "string" ? (body["model"] as string) : "?";
+    const role =
+      typeof body["role"] === "string" ? (body["role"] as string) : "researcher";
+    const text =
+      typeof body["response_text_excerpt"] === "string"
+        ? (body["response_text_excerpt"] as string)
+        : typeof body["response_text"] === "string"
+          ? (body["response_text"] as string)
+          : "";
+    const latency =
+      typeof body["latency_ms"] === "number" ? (body["latency_ms"] as number) : null;
+    const stripped = text.trim();
+    summary = stripped.length > 0
+      ? `${provider}/${model.split("/").pop() ?? model} → ${stripped.slice(0, 80)}`
+      : `${provider}/${model.split("/").pop() ?? model} · ${role}${latency !== null ? ` · ${latency}ms` : ""}`;
+    detail = `${provider} · ${model} · role=${role}${latency !== null ? ` · ${latency}ms` : ""}\n\n${stripped.length > 0 ? `"${stripped}"` : "(empty response — reasoning-mode model spent all tokens internally)"}`;
+  } else if (t === "loop.onboard_decision") {
+    const decision =
+      typeof body["decision"] === "string" ? (body["decision"] as string) : "decided";
+    const cap =
+      typeof body["cap_initial_usdc"] === "string"
+        ? (body["cap_initial_usdc"] as string)
+        : null;
+    summary = `onboard ${decision.toUpperCase()}${cap !== null ? ` · cap ${cap}` : ""}`;
+    detail = `onboarding gate: ${decision}${cap !== null ? `, initial cap ${cap} USDC6` : ""}.`;
   } else if (t === "loop.credit_tick") {
     const flag = typeof body["flag"] === "string" ? (body["flag"] as string) : "ok";
     const ltv = typeof body["ltv_current_bps"] === "number" ? body["ltv_current_bps"] : 0;
@@ -325,11 +406,16 @@ function translateRuntimeEvent(raw: {
   // line so the expanded view stays readable.
   if (detail.length === 0) detail = summary;
 
+  // Runtime emits Unix epoch SECONDS (e.g. 1778079541). JavaScript
+  // Date() expects ms; without conversion the panel renders 1/21/1970.
+  // Heuristic: anything before 10^11 (year 2286 in ms) is seconds.
+  const tsMs = raw.timestamp < 1e11 ? raw.timestamp * 1000 : raw.timestamp;
+
   return {
     id: raw.id,
     agentId,
     type: t,
-    timestamp: raw.timestamp,
+    timestamp: tsMs,
     summary,
     detail,
     market:

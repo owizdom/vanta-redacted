@@ -3,8 +3,9 @@
  * loudly, not at first-request time. Nothing exotic — env-only.
  *
  * `LOAN_BOOK_ADDRESS` and `LP_VAULT_ADDRESS` are read from
- * `contracts/deployments/local-base-sepolia.json` if not provided
- * directly. Production callers will override both.
+ * `contracts/deployments/mainnet-base.json` if not provided directly.
+ * Local-anvil dev overrides via `DEPLOYMENTS_DIR` (or by pointing the
+ * env at `local-base.json`).
  */
 
 import { readFileSync } from "node:fs";
@@ -25,14 +26,14 @@ const RawConfig = z.object({
     .string()
     .url()
     .default("http://127.0.0.1:8545"),
-  /** Chain id for the LpVault / LoanBook chain. 84532=Base Sepolia, 8453=Base mainnet. */
-  LOAN_BOOK_CHAIN_ID: z.coerce.number().int().positive().default(84532),
+  /** Chain id for the LpVault / LoanBook chain. 8453=Base mainnet (default), 84532=Base Sepolia. */
+  LOAN_BOOK_CHAIN_ID: z.coerce.number().int().positive().default(8453),
   AMOY_RPC_URL: z
     .string()
     .url()
     .default("http://127.0.0.1:8546"),
-  /** Chain id for the VantaVault chain. 80002=Polygon Amoy, 137=Polygon mainnet. */
-  AMOY_CHAIN_ID: z.coerce.number().int().positive().default(80002),
+  /** Chain id for the VantaVault chain. 137=Polygon mainnet (default), 80002=Polygon Amoy. */
+  AMOY_CHAIN_ID: z.coerce.number().int().positive().default(137),
   /** When 1, exposes /api/admin/deploy + /api/admin/send-tx for one-shot
    *  contract deploys signed by the in-TEE admin wallet. MUST go back to 0
    *  after the initial deploy is complete. Requires VANTA_DEPLOY_ADMIN_TOKEN
@@ -65,6 +66,11 @@ const RawConfig = z.object({
     .string()
     .regex(ETH_ADDR, "must be a 0x-prefixed 20-byte hex address")
     .optional(),
+  /** I-RT-4: pin the live KMS JWT's `app_id` claim. Boot fails closed if
+   *  the running EigenCompute appId doesn't match. Optional; when unset,
+   *  the assertion falls through to the existing versions.json kms.appId
+   *  pin (I-RT-3). At least one should be set in production. */
+  EXPECTED_APP_ID: z.string().optional(),
   MARK_TICK_SECONDS: z.coerce.number().int().positive().default(30),
   /** Where the deploy JSONs live; default points at the repo's checked-in path. */
   DEPLOYMENTS_DIR: z
@@ -284,6 +290,8 @@ export interface RuntimeConfig {
   readonly vantaVaultAddress: `0x${string}`;
   readonly polymarketCtfAddress: `0x${string}`;
   readonly expectedAdmin: `0x${string}` | null;
+  /** Lowercased, 0x-prefixed appId. Null when unset; see `EXPECTED_APP_ID`. */
+  readonly expectedAppId: string | null;
   readonly markTickSeconds: number;
   readonly deploymentsDir: string;
   readonly skipContractChecks: boolean;
@@ -294,24 +302,48 @@ export interface RuntimeConfig {
   readonly watchableEnabled: boolean;
 }
 
-interface DeploymentsBaseSepolia {
+interface DeploymentsBase {
   readonly LpVault?: string;
   readonly LoanBook?: string;
   readonly expectedAdmin?: string;
 }
 
-function readDeployments(deploymentsDir: string): DeploymentsBaseSepolia {
-  const path = resolve(deploymentsDir, "local-base-sepolia.json");
-  try {
-    const raw = readFileSync(path, "utf8");
-    return JSON.parse(raw) as DeploymentsBaseSepolia;
-  } catch (err: unknown) {
-    throw new TeeError(
-      "env_not_configured",
-      `failed to read deployments at ${path}: provide LOAN_BOOK_ADDRESS + LP_VAULT_ADDRESS or run scripts/deploy-local.sh`,
-      { cause: err instanceof Error ? err.message : String(err) },
-    );
+/**
+ * Read the deployments JSON for the configured Base chain.
+ *
+ * Lookup order (first existing file wins):
+ *   1. `mainnet-base.json` — production
+ *   2. `local-base-sepolia.json` — anvil-fork dev
+ *   3. `local-base.json` — generic anvil dev
+ *
+ * Production runtimes set `LOAN_BOOK_ADDRESS` + `LP_VAULT_ADDRESS` +
+ * `EXPECTED_ADMIN` directly via env, so this loader is a fallback for
+ * dev. The order ensures a misconfigured prod deploy still picks up
+ * mainnet addresses rather than silently falling through to a Sepolia
+ * file.
+ */
+function readDeployments(deploymentsDir: string): DeploymentsBase {
+  const candidates = [
+    "mainnet-base.json",
+    "local-base-sepolia.json",
+    "local-base.json",
+  ];
+  const tried: string[] = [];
+  for (const name of candidates) {
+    const path = resolve(deploymentsDir, name);
+    tried.push(path);
+    try {
+      const raw = readFileSync(path, "utf8");
+      return JSON.parse(raw) as DeploymentsBase;
+    } catch {
+      // try next
+    }
   }
+  throw new TeeError(
+    "env_not_configured",
+    `failed to read deployments — provide LOAN_BOOK_ADDRESS + LP_VAULT_ADDRESS or run scripts/deploy-local.sh`,
+    { tried: tried.join(",") },
+  );
 }
 
 /**
@@ -404,6 +436,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     vantaVaultAddress,
     polymarketCtfAddress,
     expectedAdmin: expectedAdmin === undefined ? null : (expectedAdmin as `0x${string}`),
+    expectedAppId:
+      raw.EXPECTED_APP_ID === undefined || raw.EXPECTED_APP_ID.length === 0
+        ? null
+        : raw.EXPECTED_APP_ID.toLowerCase(),
     markTickSeconds: raw.MARK_TICK_SECONDS,
     deploymentsDir: raw.DEPLOYMENTS_DIR,
     skipContractChecks: raw.SKIP_CONTRACT_CHECKS,
@@ -434,24 +470,48 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
           : (raw.X402_RECEIVER_OVERRIDE as `0x${string}`),
       internalSecret: raw.VANTA_INTERNAL_SECRET,
     },
-    payouts: buildPayoutsConfig(raw),
+    payouts: buildPayoutsConfig(raw, raw.LOAN_BOOK_CHAIN_ID),
     watchableEnabled: raw.WATCHABLE_ENABLED,
   };
 }
 
-/** Verified Base Sepolia (chainId 84532) Uniswap V3 deployment addresses. */
-const UNISWAP_V3_BASE_SEPOLIA = {
-  swapRouter02: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4" as const,
-  quoterV2: "0xC5290058841028F1614F3A6F0F5816cAd0df5E27" as const,
-  weth9: "0x4200000000000000000000000000000000000006" as const,
-} as const;
+/** Uniswap V3 deployment addresses keyed by Base chainId. The payouts
+ *  gas-refill path picks the right set based on `loanBookChainId`. */
+const UNISWAP_V3_BY_CHAIN: Record<
+  number,
+  { swapRouter02: `0x${string}`; quoterV2: `0x${string}`; weth9: `0x${string}` }
+> = {
+  // Base mainnet
+  8453: {
+    swapRouter02: "0x2626664c2603336E57B271c5C0b26F421741e481",
+    quoterV2: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+    weth9: "0x4200000000000000000000000000000000000006",
+  },
+  // Base Sepolia (testnet/CI only)
+  84532: {
+    swapRouter02: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
+    quoterV2: "0xC5290058841028F1614F3A6F0F5816cAd0df5E27",
+    weth9: "0x4200000000000000000000000000000000000006",
+  },
+};
 
-function buildPayoutsConfig(raw: z.infer<typeof RawConfig>): PayoutsConfig {
+function buildPayoutsConfig(
+  raw: z.infer<typeof RawConfig>,
+  loanBookChainId: number,
+): PayoutsConfig {
   const operatorAddress =
     raw.VANTA_OPERATOR_ADDRESS === undefined
       ? null
       : (raw.VANTA_OPERATOR_ADDRESS as `0x${string}`);
   const dryRun = raw.PAYOUTS_DRY_RUN;
+
+  const uniswap = UNISWAP_V3_BY_CHAIN[loanBookChainId];
+  if (uniswap === undefined) {
+    throw new TeeError(
+      "env_not_configured",
+      `payouts: no Uniswap V3 deployment registered for LOAN_BOOK_CHAIN_ID=${String(loanBookChainId)}`,
+    );
+  }
 
   const gas: PayoutsGasConfig = {
     enabled: raw.PAYOUTS_GAS_ENABLED,
@@ -462,9 +522,9 @@ function buildPayoutsConfig(raw: z.infer<typeof RawConfig>): PayoutsConfig {
     weeklyCapUsdc6: raw.PAYOUTS_GAS_WEEKLY_CAP_USDC6,
     slippageBps: raw.PAYOUTS_GAS_SLIPPAGE_BPS,
     poolFee: raw.PAYOUTS_GAS_POOL_FEE,
-    router: UNISWAP_V3_BASE_SEPOLIA.swapRouter02,
-    quoter: UNISWAP_V3_BASE_SEPOLIA.quoterV2,
-    weth: UNISWAP_V3_BASE_SEPOLIA.weth9,
+    router: uniswap.swapRouter02,
+    quoter: uniswap.quoterV2,
+    weth: uniswap.weth9,
   };
 
   const hosting: PayoutsVendorConfig = {

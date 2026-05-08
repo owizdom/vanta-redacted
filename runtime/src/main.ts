@@ -92,9 +92,12 @@ import { buildCandidateBatch } from "./services/candidate-feed.js";
 import type { EventSink, LoopContext, ReasoningLoop } from "./loops/types.js";
 
 // Mirrors @vanta/treasury constants (not imported to avoid bumping
-// runtime/package.json + lockfile during this slice).
-const USDC_BASE_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as const;
-const CHAIN_ID = 84532 as const;
+// runtime/package.json + lockfile during this slice). Base mainnet
+// Circle USDC + chain id; deploy targets are env-driven (see
+// LOAN_BOOK_CHAIN_ID), but X402 settlement currently pins to Base
+// mainnet — a multi-chain payout surface is Phase-2 work.
+const USDC_BASE_MAINNET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
+const CHAIN_ID = 8453 as const;
 
 // -----------------------------------------------------------------------
 // EventSink — wraps the FileEventLog with the canonical buildAndSign
@@ -255,14 +258,27 @@ async function startMain(): Promise<void> {
   const config = loadConfig();
   const boot = await bootstrap(config);
 
-  const polygonAmoyLocal = defineChain({
-    id: 80002,
-    name: "polygon-amoy-local",
-    nativeCurrency: { decimals: 18, name: "MATIC", symbol: "MATIC" },
+  // VantaVault chain. Driven by AMOY_CHAIN_ID env (137=Polygon mainnet,
+  // 80002=Amoy). The legacy `amoy*` naming is preserved through the
+  // runtime for now to avoid a wider rename — the values themselves
+  // follow the env so a mainnet config flip carries through.
+  const polygonChain = defineChain({
+    id: config.amoyChainId,
+    name:
+      config.amoyChainId === 137
+        ? "polygon-mainnet"
+        : config.amoyChainId === 80002
+          ? "polygon-amoy"
+          : "polygon-local",
+    nativeCurrency: {
+      decimals: 18,
+      name: config.amoyChainId === 137 ? "POL" : "MATIC",
+      symbol: config.amoyChainId === 137 ? "POL" : "MATIC",
+    },
     rpcUrls: { default: { http: [config.amoyRpcUrl] } },
   });
   const amoyClient = createPublicClient({
-    chain: polygonAmoyLocal,
+    chain: polygonChain,
     transport: http(config.amoyRpcUrl),
   });
 
@@ -395,8 +411,8 @@ async function startMain(): Promise<void> {
     enabled: config.x402.enabled,
     routes: meteredRoutes,
     receiver: x402Receiver,
-    usdcAddress: USDC_BASE_SEPOLIA as `0x${string}`,
-    network: "base-sepolia",
+    usdcAddress: USDC_BASE_MAINNET as `0x${string}`,
+    network: "base",
     chainId: CHAIN_ID,
     tokenName: config.x402.tokenName,
     tokenVersion: config.x402.tokenVersion,
@@ -425,7 +441,7 @@ async function startMain(): Promise<void> {
           body: {
             txHash: txHashHex,
             chainId: CHAIN_ID,
-            asset: USDC_BASE_SEPOLIA,
+            asset: USDC_BASE_MAINNET,
             amount: info.amountUsdc6.toString(),
             fromAddr: info.payer as EthAddressHex,
             toAddr: info.receiver as EthAddressHex,
@@ -446,8 +462,8 @@ async function startMain(): Promise<void> {
   await registerServiceRoutes(app, {
     priceConfig: meteredRoutes,
     receiver: x402Receiver,
-    usdcAddress: USDC_BASE_SEPOLIA,
-    network: "base-sepolia",
+    usdcAddress: USDC_BASE_MAINNET,
+    network: "base",
     metered: config.x402.enabled,
   });
 
@@ -475,7 +491,9 @@ async function startMain(): Promise<void> {
     treasuryAddress: boot.treasury.address,
     adminAddress: boot.origination.address,
     baseRpcUrl: config.loanBookRpcUrl,
+    baseChainId: config.loanBookChainId,
     amoyRpcUrl: config.amoyRpcUrl,
+    amoyChainId: config.amoyChainId,
   });
   // Payouts orchestrator — gas refill (T1) + hosting/inference (T2) on
   // the operational tick. Each bucket gates on its own *_ENABLED flag;
@@ -483,7 +501,7 @@ async function startMain(): Promise<void> {
   const payouts = new Payouts({
     bootstrap: boot,
     config: config.payouts,
-    usdcAddress: USDC_BASE_SEPOLIA,
+    usdcAddress: USDC_BASE_MAINNET,
   });
   const operationalLoop = createOperationalLoop({
     ctx,

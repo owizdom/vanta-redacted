@@ -4,7 +4,7 @@ import { RainbowKitProvider } from "@rainbow-me/rainbowkit";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { WagmiProvider } from "wagmi";
-import { baseSepolia } from "wagmi/chains";
+import { base } from "wagmi/chains";
 
 import { vantaTheme } from "@/lib/rainbowkit-theme";
 import { wagmiConfig } from "@/lib/wagmi";
@@ -22,7 +22,7 @@ export function Providers({
         <RainbowKitProvider
           theme={vantaTheme}
           modalSize="compact"
-          initialChain={baseSepolia}
+          initialChain={base}
         >
           <WalletProvider>{children}</WalletProvider>
         </RainbowKitProvider>

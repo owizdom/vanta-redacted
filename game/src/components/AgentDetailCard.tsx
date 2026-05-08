@@ -7,16 +7,23 @@ import { BorrowerFlow } from "./BorrowerFlow";
 import { DepositForm } from "./DepositForm";
 import { kingdomForAgentId } from "../lib/kingdoms";
 import {
+  extractImageDigestFromJwt,
   fetchAgent,
   fetchPoolState,
+  fetchTee,
   fetchWatchedMarkets,
   formatSignedUsdc6,
   formatUsdc6,
+  shortHash,
   type MarketWatched,
+  type TeeIdentity,
   type V3AgentRecord,
   type V3PoolState,
 } from "../lib/runtime";
 import type { ReasoningEvent } from "../lib/stream";
+
+const EIGEN_APP_ID = "0x95F2AB29fAa9A4C834B06B0514428d63C6e0E80d";
+const EIGEN_VERIFY_URL = `https://verify.eigencloud.xyz/app/${EIGEN_APP_ID}`;
 
 interface Props {
   readonly agentId: number | null;
@@ -34,6 +41,7 @@ export function AgentDetailCard({ agentId, latestReasoning, onClose, onBack }: P
   const [agent, setAgent] = useState<V3AgentRecord | null>(null);
   const [pool, setPool] = useState<V3PoolState | null>(null);
   const [markets, setMarkets] = useState<readonly MarketWatched[]>([]);
+  const [tee, setTee] = useState<TeeIdentity | null>(null);
   const [loading, setLoading] = useState(false);
   const [borrowOpen, setBorrowOpen] = useState(false);
 
@@ -62,12 +70,14 @@ export function AgentDetailCard({ agentId, latestReasoning, onClose, onBack }: P
       fetchAgent(agentId),
       fetchPoolState(agentId),
       fetchWatchedMarkets(),
+      fetchTee(),
     ])
-      .then(([a, p, m]) => {
+      .then(([a, p, m, t]) => {
         if (cancelled) return;
         setAgent(a);
         setPool(p);
         setMarkets(m.slice(0, 5));
+        setTee(t);
       })
       .catch(() => {
         // runtime offline — keep nulls so the empty state renders
@@ -84,7 +94,15 @@ export function AgentDetailCard({ agentId, latestReasoning, onClose, onBack }: P
     if (agentId === null) return null;
     for (let i = latestReasoning.length - 1; i >= 0; --i) {
       const ev = latestReasoning[i]!;
-      if (ev.agentId === agentId && ev.type === "reasoning.trace") return ev;
+      if (
+        ev.agentId === agentId &&
+        (ev.type === "reasoning.trace" ||
+          ev.type === "op.inference" ||
+          ev.type === "council.synthesised" ||
+          ev.type === "loan.origination")
+      ) {
+        return ev;
+      }
     }
     return null;
   }, [latestReasoning, agentId]);
@@ -218,13 +236,43 @@ export function AgentDetailCard({ agentId, latestReasoning, onClose, onBack }: P
             )}
           </Section>
 
-          {/* tee identity */}
+          {/* tee identity — real values from /api/tee, derived inside the
+              EigenCompute enclave. Click any row to verify externally. */}
           <Section label="tee identity">
             <div className="space-y-2 rounded-[2px] border border-ink-700 bg-ink-800/60 p-3 font-mono text-[10px]">
-              <Row k="image digest" v={agent?.image_digest ?? "—"} />
-              <Row k="attestation" v={agent?.attestation_hash ?? "—"} />
-              <Row k="pool" v={agent?.pool ?? "—"} />
-              <Row k="position book" v={agent?.position_book ?? "—"} />
+              <Row
+                k="eigen app"
+                v={EIGEN_APP_ID}
+                href={EIGEN_VERIFY_URL}
+                truncate
+              />
+              <Row
+                k="image digest"
+                v={
+                  tee?.identityAnchor?.jwt
+                    ? extractImageDigestFromJwt(tee.identityAnchor.jwt) ?? "—"
+                    : "—"
+                }
+                truncate
+              />
+              <Row
+                k="enclave id"
+                v={tee?.enclaveIdentityHash ?? "—"}
+                truncate
+              />
+              <Row
+                k="signing key"
+                v={tee?.signingPubKey ?? "—"}
+                truncate
+              />
+              <Row
+                k="admin EOA"
+                v={tee?.originationAddress ?? "—"}
+                truncate
+              />
+              {tee?.identityAnchor?.audience ? (
+                <Row k="audience" v={tee.identityAnchor.audience} />
+              ) : null}
             </div>
           </Section>
         </div>
@@ -313,13 +361,42 @@ function Stat({ label, value, tone = "neutral" }: StatProps): JSX.Element {
   );
 }
 
-function Row({ k, v }: { readonly k: string; readonly v: string }): JSX.Element {
+interface RowProps {
+  readonly k: string;
+  readonly v: string;
+  readonly href?: string;
+  readonly truncate?: boolean;
+}
+
+function Row({ k, v, href, truncate }: RowProps): JSX.Element {
+  const display =
+    truncate && v.length > 24 ? shortHash(v.replace(/^0x/, ""), 10, 8) : v;
+  const inner = (
+    <span
+      className={`text-chalk-300 ${href ? "hover:text-chalk-100" : ""}`}
+      title={v}
+    >
+      {display}
+      {href ? <span className="ml-1 text-chalk-500">↗</span> : null}
+    </span>
+  );
   return (
     <div className="flex items-baseline gap-3">
-      <span className="w-28 shrink-0 text-[9px] uppercase tracking-[0.22em] text-chalk-500">
+      <span className="w-24 shrink-0 text-[9px] uppercase tracking-[0.22em] text-chalk-500">
         {k}
       </span>
-      <span className="truncate text-chalk-300">{v}</span>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="truncate"
+        >
+          {inner}
+        </a>
+      ) : (
+        <span className="truncate">{inner}</span>
+      )}
     </div>
   );
 }

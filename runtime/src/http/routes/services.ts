@@ -76,8 +76,8 @@ export interface ServiceRoutesOpts {
   readonly receiver: string;
   /** USDC token address for the discovery doc. */
   readonly usdcAddress: string;
-  /** Network label. */
-  readonly network: "base-sepolia";
+  /** Network label per Coinbase X402 spec: `"base"` mainnet, `"base-sepolia"` testnet. */
+  readonly network: "base" | "base-sepolia";
   /** Whether X402 metering is enabled (drives the discovery doc). */
   readonly metered: boolean;
 }

@@ -28,14 +28,18 @@
  */
 
 import { createPublicClient, http, type Address } from "viem";
-import { baseSepolia, polygonAmoy } from "viem/chains";
+import { base, baseSepolia, polygon, polygonAmoy } from "viem/chains";
 
 import type { OperationalSnapshot } from "../loops/operational.js";
 
-// USDC on Base Sepolia (Circle-issued). Same as
-// `contracts/script/01_LpVault.s.sol::USDC`; pinned here to keep this
-// module independent of the deploy-script imports.
-const BASE_SEPOLIA_USDC: Address = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+// USDC by Base chainId. The operational reader keys off the configured
+// `baseChainId` so a Sepolia-fork dev environment continues to read
+// the testnet USDC, while production reads the canonical Base mainnet
+// Circle-issued USDC.
+const USDC_BY_BASE_CHAIN: Record<number, Address> = {
+  8453: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // Base mainnet
+  84532: "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // Base Sepolia
+};
 
 const ERC20_BALANCE_OF_ABI = [
   {
@@ -67,7 +71,9 @@ export interface OperationalSnapshotArgs {
   readonly treasuryAddress: Address;
   readonly adminAddress: Address;
   readonly baseRpcUrl: string;
+  readonly baseChainId: number;
   readonly amoyRpcUrl: string;
+  readonly amoyChainId: number;
 }
 
 export interface OperationalReader {
@@ -81,15 +87,24 @@ export function createOperationalReader(
   args: OperationalSnapshotArgs,
 ): OperationalReader {
   // Note: not annotating these as `PublicClient` — Base (Optimism stack)
-  // and Polygon Amoy define divergent transaction shapes in viem 2.22's
-  // chain types, and a shared `PublicClient` annotation collapses them
-  // to incompatible. Inferred types are precise per-call.
+  // and Polygon define divergent transaction shapes in viem 2.22's chain
+  // types, and a shared `PublicClient` annotation collapses them to
+  // incompatible. Inferred types are precise per-call.
+  const baseChain = args.baseChainId === 8453 ? base : baseSepolia;
+  const polygonChain = args.amoyChainId === 137 ? polygon : polygonAmoy;
+  const lookupUsdc = USDC_BY_BASE_CHAIN[args.baseChainId];
+  if (lookupUsdc === undefined) {
+    throw new Error(
+      `operational-snapshot: no USDC address registered for baseChainId=${String(args.baseChainId)}`,
+    );
+  }
+  const usdcAddress: Address = lookupUsdc;
   const baseClient = createPublicClient({
-    chain: baseSepolia,
+    chain: baseChain,
     transport: http(args.baseRpcUrl),
   });
   const amoyClient = createPublicClient({
-    chain: polygonAmoy,
+    chain: polygonChain,
     transport: http(args.amoyRpcUrl),
   });
 
@@ -115,7 +130,7 @@ export function createOperationalReader(
     const treasuryUsdc = await tryRead(
       () =>
         baseClient.readContract({
-          address: BASE_SEPOLIA_USDC,
+          address: usdcAddress,
           abi: ERC20_BALANCE_OF_ABI,
           functionName: "balanceOf",
           args: [args.treasuryAddress],

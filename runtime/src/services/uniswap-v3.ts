@@ -12,9 +12,10 @@
  *      ])
  *      — delivers ETH directly to the admin EOA at the end of the call.
  *
- * Addresses are pinned for Base Sepolia (chainId 84532); pass-through
- * for other chains is intentional — callers must verify pool depth +
- * fee tier before reusing on a different chain.
+ * Addresses below are pinned for the chain VANTA's Payouts run on.
+ * `BASE_MAINNET_UNISWAP_V3` is the production set (chainId 8453); the
+ * `BASE_SEPOLIA_UNISWAP_V3` testnet set is preserved for dev/CI. The
+ * config layer picks the right set per `loanBookChainId`.
  */
 
 import {
@@ -25,13 +26,32 @@ import {
   type PublicClient,
 } from "viem";
 
-/** Verified Base Sepolia (chainId 84532) deployment addresses. */
+/** Verified Base mainnet (chainId 8453) deployment addresses. */
+export const BASE_MAINNET_UNISWAP_V3 = {
+  SwapRouter02: "0x2626664c2603336E57B271c5C0b26F421741e481" as Address,
+  QuoterV2: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a" as Address,
+  WETH9: "0x4200000000000000000000000000000000000006" as Address,
+  V3Factory: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD" as Address,
+} as const;
+
+/** Verified Base Sepolia (chainId 84532) deployment addresses — testnet only. */
 export const BASE_SEPOLIA_UNISWAP_V3 = {
   SwapRouter02: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4" as Address,
   QuoterV2: "0xC5290058841028F1614F3A6F0F5816cAd0df5E27" as Address,
   WETH9: "0x4200000000000000000000000000000000000006" as Address,
   V3Factory: "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24" as Address,
 } as const;
+
+/** Pick the deployment set for the given Base chainId. */
+export function uniswapV3ForChain(
+  chainId: number,
+): typeof BASE_MAINNET_UNISWAP_V3 {
+  if (chainId === 8453) return BASE_MAINNET_UNISWAP_V3;
+  if (chainId === 84532) return BASE_SEPOLIA_UNISWAP_V3;
+  throw new Error(
+    `uniswapV3ForChain: no Uniswap V3 deployment registered for chainId=${String(chainId)}`,
+  );
+}
 
 /** Common Uniswap V3 fee tiers (basis points × 100). 500 = 0.05%. */
 export const UNISWAP_V3_FEE_TIERS = {

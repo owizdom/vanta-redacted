@@ -46,7 +46,7 @@ export function Marketplace(): JSX.Element {
             from real loans the agent originates.
           </p>
           <p className="font-mono text-xs uppercase tracking-[0.22em] text-chalk-500">
-            base sepolia · 77% liquidation floor · weekly on-chain spend cap
+            base mainnet · 77% liquidation floor · weekly on-chain spend cap
           </p>
           <div className="pt-1">
             <MadeSovereignWith size="md" />

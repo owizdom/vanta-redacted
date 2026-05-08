@@ -202,5 +202,9 @@ function labelForType(t: ReasoningEvent["type"]): string {
       return "loan liquidated";
     case "loop.credit_tick":
       return "credit tick";
+    case "op.inference":
+      return "model call";
+    case "loop.onboard_decision":
+      return "onboard decision";
   }
 }

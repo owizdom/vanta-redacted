@@ -57,7 +57,7 @@ export function LandingMenu(): JSX.Element {
           </div>
 
           <div className="mt-6 flex flex-col items-center gap-3 font-mono text-[10px] uppercase tracking-[0.32em] text-chalk-500">
-            <span>v3.0 · base sepolia</span>
+            <span>v3.0 · base mainnet</span>
             <MadeSovereignWith size="md" />
           </div>
         </div>

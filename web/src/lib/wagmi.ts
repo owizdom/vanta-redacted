@@ -6,12 +6,12 @@ import {
   rainbowWallet,
 } from "@rainbow-me/rainbowkit/wallets";
 import { http, createConfig } from "wagmi";
-import { baseSepolia, polygonAmoy } from "wagmi/chains";
+import { base, polygon } from "wagmi/chains";
 
 import { demoWallet } from "./wallets/demo-wallet";
 
 /**
- * wagmi config — Base Sepolia + Polygon Amoy (matches our deploy targets).
+ * wagmi config — Base mainnet + Polygon mainnet (matches our deploy targets).
  *
  * Connectors are built via RainbowKit's `connectorsForWallets` so the
  * UI wallet picker matches the wagmi config 1:1.
@@ -44,12 +44,12 @@ const connectors = connectorsForWallets(
 );
 
 export const wagmiConfig = createConfig({
-  chains: [baseSepolia, polygonAmoy],
+  chains: [base, polygon],
   ssr: true,
   connectors,
   transports: {
-    [baseSepolia.id]: http(),
-    [polygonAmoy.id]: http(),
+    [base.id]: http(),
+    [polygon.id]: http(),
   },
 });
 

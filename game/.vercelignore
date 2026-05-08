@@ -1,0 +1,9 @@
+node_modules
+src
+.gitignore
+tsconfig*.json
+vite.config.*
+package.json
+pnpm-lock.yaml
+README.md
+public

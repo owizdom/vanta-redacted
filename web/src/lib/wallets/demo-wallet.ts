@@ -14,7 +14,7 @@
 
 import type { Wallet, WalletDetailsParams } from "@rainbow-me/rainbowkit";
 import { createConnector } from "@wagmi/core";
-import { baseSepolia } from "wagmi/chains";
+import { base } from "wagmi/chains";
 
 import {
   DEMO_ADDRESS,
@@ -56,7 +56,7 @@ export const demoWallet = (): Wallet => ({
 
       async connect({ chainId } = {}) {
         const accounts = [DEMO_ADDRESS] as readonly `0x${string}`[];
-        const cid = chainId ?? baseSepolia.id;
+        const cid = chainId ?? base.id;
         triggerDemoConnect();
         config.emitter.emit("connect", {
           accounts: accounts as `0x${string}`[],
@@ -75,7 +75,7 @@ export const demoWallet = (): Wallet => ({
       },
 
       async getChainId() {
-        return baseSepolia.id;
+        return base.id;
       },
 
       async isAuthorized() {
@@ -87,9 +87,9 @@ export const demoWallet = (): Wallet => ({
         // Demo is single-chain; report the requested chain back so
         // RainbowKit's chain switcher closes cleanly. No real switch.
         const next =
-          chainId === baseSepolia.id
-            ? baseSepolia
-            : { ...baseSepolia, id: chainId };
+          chainId === base.id
+            ? base
+            : { ...base, id: chainId };
         config.emitter.emit("change", { chainId });
         return next;
       },

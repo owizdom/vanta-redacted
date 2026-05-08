@@ -17,23 +17,68 @@ export interface VantaEventSummary {
   readonly body: Record<string, unknown>;
 }
 
+export interface MarketWatchedToken {
+  readonly tokenId: string;
+  readonly outcome: string;
+  readonly price: string;
+  readonly winner: boolean;
+}
+
 export interface MarketWatched {
   readonly conditionId: string;
   readonly question: string | null;
   readonly closed: boolean;
   readonly accepting_orders: boolean;
   readonly mid: { readonly yes: string | null; readonly no: string | null };
+  readonly tokens: readonly MarketWatchedToken[];
   readonly polymarket_url: string | null;
   readonly short_name: string | null;
+  readonly owner_side: "YES" | "NO" | null;
   readonly stale: boolean;
   readonly fetched_at_unix_ms: number;
+  readonly volume_usd?: number;
+  readonly liquidity_usd?: number;
+  readonly end_date_iso?: string | null;
 }
 
 export interface TeeIdentity {
+  readonly active?: boolean;
   readonly signingPubKey: string;
+  readonly attestationJwt?: string;
+  readonly enclaveIdentityHash?: string;
   readonly bootedAt: number;
+  readonly originationAddress?: string;
+  readonly treasuryAddress?: string;
   readonly origination?: { readonly address: string };
-  readonly identityAnchor?: { readonly kind: string };
+  readonly identityAnchor?: {
+    readonly kind: string;
+    readonly audience?: string;
+    readonly jwt?: string;
+  };
+}
+
+/**
+ * Decode the EigenCompute KMS JWT (no signature verification — the
+ * gateway is the source of truth for that). Returns the container
+ * image digest baked into the attestation, or null if the JWT is
+ * malformed.
+ */
+export function extractImageDigestFromJwt(jwt: string): string | null {
+  try {
+    const parts = jwt.split(".");
+    if (parts.length !== 3) return null;
+    const payloadB64 = parts[1] ?? "";
+    const padded = payloadB64.replace(/-/g, "+").replace(/_/g, "/");
+    const padLen = (4 - (padded.length % 4)) % 4;
+    const json = atob(padded + "=".repeat(padLen));
+    const payload = JSON.parse(json) as Record<string, unknown>;
+    const submods = payload["submods"] as Record<string, unknown> | undefined;
+    const container = submods?.["container"] as Record<string, unknown> | undefined;
+    const digest = container?.["image_digest"];
+    return typeof digest === "string" ? digest : null;
+  } catch {
+    return null;
+  }
 }
 
 const ROOT = import.meta.env.VITE_RUNTIME_URL ?? "/api/runtime";

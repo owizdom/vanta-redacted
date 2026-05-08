@@ -76,14 +76,22 @@ interface PortfolioPosition {
  *      loan.origination. Each event lands in the chat panel via SSE.
  *
  * Why no on-chain `LoanBook.originate`: that requires actual CTF
- * tokens escrowed in `VantaVault` on Polygon Amoy, which the demo
+ * tokens escrowed in `VantaVault` on Polygon mainnet, which the demo
  * wallet doesn't have. The signed audit chain is the same shape —
- * the only thing missing is a Base Sepolia tx hash, and the demo
+ * the only thing missing is a Base mainnet tx hash, and the demo
  * substitutes a synthetic one for narrative completeness.
  */
 export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | null {
   const { address, isConnected } = useAccount();
   const [stage, setStage] = useState<FormStage>({ kind: "input" });
+
+  // Demo wallet detection — synthetic address has no signer; the
+  // real-borrow path would prompt for a sig the wallet can't produce,
+  // so demo always falls through to /admin/demo/borrow. Computed
+  // early because the portfolio builder depends on it.
+  const isDemoWallet =
+    address !== undefined &&
+    address.toLowerCase() === DEMO_ADDRESS.toLowerCase();
 
   // Live markets the runtime is actually watching right now.
   const { markets: liveMarkets, loading: marketsLoading, error: marketsError } =
@@ -124,10 +132,14 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
     );
   }, [balancesQuery.data]);
 
-  // Build the portfolio: prefer real on-chain balances; fall back to
-  // a synthetic sample only when the wallet holds no CTF positions in
-  // the watched set. The synthetic fallback is clearly labeled "demo"
-  // so users always know which path they're on.
+  // Build the portfolio:
+  //   - Demo wallet (or no wallet) → synthetic sample portfolio so
+  //     visitors can preview the council flow without holding any
+  //     positions. Submits via /admin/demo/borrow.
+  //   - Real wallet → ONLY real CTF holdings on Polygon. If the
+  //     wallet holds nothing in the watched set, the modal renders
+  //     an empty state pushing the user to polymarket.com — never
+  //     fabricated positions.
   const portfolio = useMemo<readonly PortfolioPosition[]>(() => {
     const real: PortfolioPosition[] = [];
     themedMarkets.forEach((m, i) => {
@@ -144,25 +156,17 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
       }
     });
     if (real.length > 0) return real;
+    if (!isDemoWallet && isConnected) return [];
 
-    // Demo fallback so the modal stays interactive when the connected
-    // wallet has no Polymarket positions in the watched set.
     return themedMarkets.map((m, i) => {
       const sharesByIdx = [2400, 1500, 950, 3200];
       const shares = sharesByIdx[i] ?? 1000;
       const entryPrice = Math.max(0.02, m.currentMid - 0.02 + i * 0.005);
       return { market: m, shares, entryPrice, real: false };
     });
-  }, [themedMarkets, realBalances]);
+  }, [themedMarkets, realBalances, isDemoWallet, isConnected]);
 
   const hasRealPositions = portfolio.some((p) => p.real);
-
-  // Demo wallet detection — synthetic address has no signer; the
-  // real-borrow path below would prompt for a sig the wallet can't
-  // produce, so demo always falls through to /admin/demo/borrow.
-  const isDemoWallet =
-    address !== undefined &&
-    address.toLowerCase() === DEMO_ADDRESS.toLowerCase();
 
   const { writeContractAsync } = useWriteContract();
 
@@ -341,88 +345,115 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
       }}
     >
       <div
-        className="grid w-full max-w-4xl grid-cols-2 gap-4 max-h-[88vh]"
+        className="grid w-full max-w-3xl grid-cols-1 md:grid-cols-2 gap-3 max-h-[88vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* form */}
         <div
-          className="overflow-y-auto rounded-[2px] border border-ink-700 bg-ink-900 p-5"
+          className="overflow-y-auto rounded-[2px] border border-ink-700 bg-ink-900 p-4"
           style={{ borderColor: `${kingdom.color}55` }}
         >
-          <header className="mb-4 flex items-center justify-between">
-            <div>
-              <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-chalk-500">
-                borrow against your position
+          <header className="mb-3 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-mono text-[9px] uppercase tracking-[0.22em] text-chalk-500">
+                loan request
               </div>
               <div
-                className="mt-1 font-display text-2xl font-bold"
+                className="font-display text-xl font-semibold leading-tight"
                 style={{ color: kingdom.color }}
               >
-                {kingdom.displayName} · loan request
+                {kingdom.displayName}
               </div>
             </div>
             <button
               onClick={onClose}
-              className="font-mono text-xs uppercase tracking-[0.22em] text-chalk-400 hover:text-chalk-100"
+              className="shrink-0 rounded-[2px] border border-ink-700 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.22em] text-chalk-400 hover:text-chalk-100"
             >
-              close [esc]
+              close
             </button>
           </header>
 
-          <Step n={1} title="connect wallet" done={isConnected}>
-            {isConnected ? (
-              <div className="font-mono text-[10px] text-chalk-400">
-                connected as <span className="text-chalk-200">{address}</span>
-              </div>
-            ) : (
-              <div className="font-mono text-[10px] text-chalk-500">
-                use the connect-wallet button on the world view to import
-                your Polymarket portfolio.
-              </div>
-            )}
-          </Step>
+          {!isConnected ? (
+            <div className="mb-3 rounded-[2px] border border-signal-amber/40 bg-signal-amber/5 p-2 font-mono text-[10px] text-signal-amber">
+              connect a wallet from the world view to continue.
+            </div>
+          ) : (
+            <div className="mb-3 flex items-center gap-2 rounded-[2px] border border-ink-700 bg-ink-800/40 px-2 py-1 font-mono text-[10px] text-chalk-400">
+              <span className="text-signal-green">●</span>
+              <span className="truncate text-chalk-200">
+                {address?.slice(0, 6)}…{address?.slice(-4)}
+              </span>
+              <span className="ml-auto text-chalk-500">connected</span>
+            </div>
+          )}
 
-          <Step n={2} title="pick a position to borrow against">
-            <p className="mb-3 text-[10px] leading-relaxed text-chalk-400">
-              These are the {kingdom.displayName} positions in your Polymarket portfolio.
-              You keep the upside; <span className="text-chalk-200">{kingdom.displayName}</span> lends
-              you USDC against the current value (haircut {(HAIRCUT_BPS / 100).toFixed(0)}%).
+          <Step title="pick a position">
+            <p className="mb-2 text-[10px] leading-relaxed text-chalk-400">
+              borrow USDC against a polymarket bet — keep the upside, get cash now (haircut {(HAIRCUT_BPS / 100).toFixed(0)}%).
             </p>
-            {address !== undefined ? (
-              hasRealPositions ? (
-                <div className="mb-3 rounded-[2px] border border-signal-green/40 bg-signal-green/5 p-2 font-mono text-[10px] uppercase tracking-[0.18em] text-signal-green">
-                  ● live positions read from polymarket on polygon
-                </div>
-              ) : (
-                <div className="mb-3 rounded-[2px] border border-ink-700 bg-ink-900/85 p-2 font-mono text-[10px] text-chalk-400">
-                  no polymarket positions found on{" "}
-                  <span className="text-chalk-200">{address.slice(0, 6)}…{address.slice(-4)}</span>{" "}
-                  for these markets — showing a demo portfolio so you can see
-                  the council flow.{" "}
-                  <a
-                    href="https://polymarket.com/"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-chalk-200 underline"
-                  >
-                    buy yes/no shares ↗
-                  </a>
-                </div>
-              )
+            {hasRealPositions ? (
+              <div className="mb-2 rounded-[2px] border border-signal-green/40 bg-signal-green/5 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-signal-green">
+                ● live polygon · pledge → real loanbook
+              </div>
+            ) : isDemoWallet ? (
+              <div className="mb-2 rounded-[2px] border border-ink-700 bg-ink-800/40 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-chalk-500">
+                demo wallet · synthesised council flow
+              </div>
+            ) : isConnected ? (
+              <div className="mb-2 rounded-[2px] border border-signal-amber/40 bg-signal-amber/5 px-2 py-1 font-mono text-[10px] text-signal-amber">
+                no polymarket positions on{" "}
+                <span className="text-chalk-100">
+                  {address?.slice(0, 6)}…{address?.slice(-4)}
+                </span>{" "}
+                — to use the real flow, buy YES/NO shares on{" "}
+                <a
+                  href="https://polymarket.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline hover:text-chalk-100"
+                >
+                  polymarket ↗
+                </a>{" "}
+                in one of these markets, then come back.
+              </div>
             ) : null}
             {marketsLoading && portfolio.length === 0 ? (
-              <div className="rounded-[2px] border border-ink-700 bg-ink-900/85 p-3 font-mono text-[10px] text-chalk-500">
-                loading live markets from runtime…
+              <div className="rounded-[2px] border border-ink-700 bg-ink-800/40 px-2 py-1.5 font-mono text-[10px] text-chalk-500">
+                loading…
               </div>
             ) : null}
             {!marketsLoading && portfolio.length === 0 ? (
-              <div className="rounded-[2px] border border-ink-700 bg-ink-900/85 p-3 font-mono text-[10px] text-chalk-500">
-                {marketsError !== null
-                  ? `runtime markets unreachable: ${marketsError}`
-                  : "no live markets available right now."}
-              </div>
+              marketsError !== null ? (
+                <div className="rounded-[2px] border border-ink-700 bg-ink-800/40 px-2 py-1.5 font-mono text-[10px] text-chalk-500">
+                  runtime unreachable: {marketsError}
+                </div>
+              ) : isConnected && !isDemoWallet && themedMarkets.length > 0 ? (
+                <div className="space-y-1">
+                  <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-chalk-500">
+                    eligible markets
+                  </div>
+                  {themedMarkets.map((m) => (
+                    <a
+                      key={m.conditionIdHex}
+                      href={m.polymarketUrl ?? "https://polymarket.com/"}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-between gap-2 rounded-[2px] border border-ink-700 bg-ink-800/40 px-2.5 py-1.5 font-mono text-[10px] text-chalk-300 hover:border-ink-500 hover:text-chalk-100"
+                    >
+                      <span className="truncate">{m.shortName}</span>
+                      <span className="shrink-0 text-chalk-500">
+                        {m.side}@{m.currentMid.toFixed(2)} ↗
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-[2px] border border-ink-700 bg-ink-800/40 px-2 py-1.5 font-mono text-[10px] text-chalk-500">
+                  no live markets right now.
+                </div>
+              )
             ) : null}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {portfolio.map((p, i) => {
                 const value = p.shares * p.market.currentMid;
                 const isSelected = i === selectedIdx;
@@ -432,7 +463,7 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
                     type="button"
                     onClick={() => setSelectedIdx(i)}
                     className={[
-                      "w-full rounded-[2px] border p-3 text-left transition-colors",
+                      "w-full rounded-[2px] border px-2.5 py-2 text-left transition-colors",
                       isSelected
                         ? "border-chalk-200 bg-ink-800"
                         : "border-ink-700 bg-ink-900/85 hover:border-ink-500",
@@ -443,28 +474,29 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
                         : undefined
                     }
                   >
-                    <div className="font-mono text-[11px] text-chalk-100 leading-snug">
-                      {p.market.question}
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2 font-mono text-[10px] text-chalk-400">
-                      <span style={{ color: kingdom.color }}>
-                        {p.market.side} @ {p.market.currentMid.toFixed(2)}
-                      </span>
-                      <span>·</span>
-                      <span>{p.shares.toLocaleString()} shares</span>
-                      <span>·</span>
-                      <span className="text-chalk-200">
-                        ${value.toLocaleString(undefined, { maximumFractionDigits: 0 })} value
-                      </span>
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1 font-mono text-[11px] text-chalk-100 leading-snug truncate">
+                        {p.market.shortName}
+                      </div>
                       {p.real ? (
-                        <span className="rounded-[2px] border border-signal-green/40 px-1.5 py-px text-[8px] uppercase tracking-[0.2em] text-signal-green">
+                        <span className="shrink-0 rounded-[2px] border border-signal-green/40 px-1.5 py-px text-[8px] uppercase tracking-[0.2em] text-signal-green">
                           live
                         </span>
                       ) : (
-                        <span className="rounded-[2px] border border-ink-600 px-1.5 py-px text-[8px] uppercase tracking-[0.2em] text-chalk-500">
+                        <span className="shrink-0 rounded-[2px] border border-ink-600 px-1.5 py-px text-[8px] uppercase tracking-[0.2em] text-chalk-500">
                           demo
                         </span>
                       )}
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 font-mono text-[9.5px] text-chalk-400">
+                      <span style={{ color: kingdom.color }}>
+                        {p.market.side}@{p.market.currentMid.toFixed(2)}
+                      </span>
+                      <span>·</span>
+                      <span>{p.shares.toLocaleString()} shrs</span>
+                      <span className="ml-auto text-chalk-200">
+                        ${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                      </span>
                     </div>
                   </button>
                 );
@@ -472,19 +504,19 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
             </div>
           </Step>
 
-          <Step n={3} title="loan amount">
+          <Step title="loan amount">
             <div className="mb-2 flex items-baseline justify-between font-mono text-[10px]">
               <span className="text-chalk-400">max loan</span>
               <span className="text-chalk-200">
                 ${maxLoanUsdc.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                 <span className="ml-1 text-chalk-500">
-                  ({(HAIRCUT_BPS / 100).toFixed(0)}% of position value)
+                  ({(HAIRCUT_BPS / 100).toFixed(0)}%)
                 </span>
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2">
               <NumberInput
-                label="usdc requested"
+                label="usdc"
                 value={principalUsdc}
                 onChange={setPrincipalUsdc}
                 prefix="$"
@@ -495,14 +527,13 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
                 onChange={setMaturityDays}
               />
             </div>
-            <div className="mt-2 flex items-baseline justify-between font-mono text-[10px]">
-              <span className="text-chalk-400">rate</span>
-              <span className="text-chalk-200">≈ {apr.toFixed(1)}% APR</span>
-            </div>
-            <div className="flex items-baseline justify-between font-mono text-[10px]">
-              <span className="text-chalk-400">interest at maturity</span>
-              <span className="text-chalk-200">
-                ${((principalNum * apr) / 100 * (Number(maturityDays) / 365)).toFixed(2)}
+            <div className="mt-2 flex items-center justify-between font-mono text-[9.5px] text-chalk-400">
+              <span>≈ {apr.toFixed(1)}% APR</span>
+              <span>
+                interest{" "}
+                <span className="text-chalk-200">
+                  ${((principalNum * apr) / 100 * (Number(maturityDays) / 365)).toFixed(2)}
+                </span>
               </span>
             </div>
           </Step>
@@ -511,11 +542,11 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
             disabled={!isConnected || !selected || !principalOk || stage.kind === "submitting"}
             onClick={() => void onSubmit()}
             className={[
-              "mt-4 w-full rounded-[2px] border border-black/40 px-4 py-2.5 font-mono text-xs uppercase tracking-[0.22em] font-medium",
-              "transition-transform duration-150 active:translate-y-[2px] disabled:cursor-not-allowed disabled:opacity-40",
-              "shadow-[inset_0_-3px_0_0_rgba(0,0,0,0.45),inset_0_2px_0_0_rgba(255,255,255,0.18)]",
+              "mt-3 w-full rounded-[2px] border border-black/40 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] font-medium",
+              "transition-transform duration-150 active:translate-y-[1px] disabled:cursor-not-allowed disabled:opacity-40",
+              "shadow-[inset_0_-2px_0_0_rgba(0,0,0,0.4),inset_0_1px_0_0_rgba(255,255,255,0.18)]",
             ].join(" ")}
-            style={{ background: kingdom.color, color: "#0b0b0e", boxShadow: `0 0 24px -6px ${kingdom.color}` }}
+            style={{ background: kingdom.color, color: "#0b0b0e", boxShadow: `0 0 20px -8px ${kingdom.color}` }}
           >
             {stage.kind === "submitting"
               ? stage.step ?? "council deliberating…"
@@ -559,31 +590,31 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
 
         {/* live council feed */}
         <div
-          className="overflow-y-auto rounded-[2px] border border-ink-700 bg-ink-900 p-4"
+          className="overflow-y-auto rounded-[2px] border border-ink-700 bg-ink-900 p-3"
           style={{ borderColor: `${kingdom.color}33` }}
         >
-          <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.22em] text-chalk-500">
+          <div className="mb-2 font-mono text-[9px] uppercase tracking-[0.22em] text-chalk-500">
             council · live feed
           </div>
           {filteredFeed.length === 0 ? (
-            <div className="flex h-full items-center justify-center font-mono text-[10px] text-chalk-600">
+            <div className="flex h-full min-h-[140px] items-center justify-center px-4 text-center font-mono text-[10px] text-chalk-600">
               {stage.kind === "submitting"
-                ? "•••\nwaiting for council activity…"
+                ? "waiting for council activity…"
                 : stage.kind === "input"
-                  ? "submit a loan to start the council deliberation"
+                  ? "submit a loan to start the council"
                   : "•••"}
             </div>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-1.5">
               {filteredFeed.map((e) => (
                 <li
                   key={e.id}
-                  className="rounded-[2px] border border-ink-700 bg-ink-900/85 p-2.5"
+                  className="rounded-[2px] border border-ink-700 bg-ink-800/50 px-2 py-1.5"
                 >
-                  <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-chalk-500">
+                  <div className="font-mono text-[8.5px] uppercase tracking-[0.18em] text-chalk-500">
                     {labelForFeed(e.type)}
                   </div>
-                  <div className="mt-1 font-mono text-[11px] text-chalk-200 leading-relaxed">
+                  <div className="mt-0.5 font-mono text-[10.5px] text-chalk-200 leading-snug">
                     {e.summary}
                   </div>
                 </li>
@@ -612,7 +643,7 @@ function labelForFeed(t: ReasoningEvent["type"]): string {
 }
 
 interface StepProps {
-  readonly n: number;
+  readonly n?: number;
   readonly title: string;
   readonly done?: boolean;
   readonly children: React.ReactNode;
@@ -620,9 +651,10 @@ interface StepProps {
 
 function Step({ n, title, done = false, children }: StepProps): JSX.Element {
   return (
-    <section className="mb-4">
-      <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.22em] text-chalk-300">
-        {done ? "✓" : `${String(n)}.`} {title}
+    <section className="mb-3">
+      <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.22em] text-chalk-500">
+        {done ? "✓ " : n !== undefined ? `${String(n)}. ` : ""}
+        {title}
       </div>
       {children}
     </section>
@@ -639,18 +671,18 @@ interface NumberInputProps {
 function NumberInput({ label, value, onChange, prefix }: NumberInputProps): JSX.Element {
   return (
     <label className="block">
-      <div className="mb-1 font-mono text-[9px] uppercase tracking-[0.18em] text-chalk-500">
+      <div className="mb-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-chalk-500">
         {label}
       </div>
       <div className="flex items-center rounded-[2px] border border-ink-700 bg-ink-900 focus-within:border-chalk-500">
         {prefix ? (
-          <span className="pl-2 font-mono text-[11px] text-chalk-400">{prefix}</span>
+          <span className="pl-1.5 font-mono text-[11px] text-chalk-400">{prefix}</span>
         ) : null}
         <input
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full bg-transparent px-2 py-1.5 font-mono text-[11px] text-chalk-200 outline-none"
+          className="w-full bg-transparent px-1.5 py-1 font-mono text-[11px] text-chalk-200 outline-none"
         />
       </div>
     </label>

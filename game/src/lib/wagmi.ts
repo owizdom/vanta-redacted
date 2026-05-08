@@ -13,31 +13,30 @@ import { base, baseSepolia, polygon, polygonAmoy } from "wagmi/chains";
 import { demoWallet } from "./wallets/demo-wallet";
 
 /**
- * wagmi config — testnet (Base Sepolia + Polygon Amoy) by default,
- * mainnet (Base + Polygon) when VITE_CHAIN_ENV=mainnet. Vite is SPA
- * so no `ssr: true` flag here (unlike /web).
+ * wagmi config — mainnet (Base + Polygon) by default; testnet
+ * (Base Sepolia + Polygon Amoy) when `VITE_CHAIN_ENV=testnet`. Vite
+ * is SPA so no `ssr: true` flag here (unlike /web).
  *
- * The demo connector group (anvil-keyed wallet, localhost RPC) is
- * only registered when VITE_DEMO_MODE=1. Production Vercel builds
- * leave VITE_DEMO_MODE unset → demoWallet is excluded from the
- * connector list entirely.
+ * The demo connector group is always shown. On mainnet it has no
+ * private key (read-only address; borrow flow uses the runtime's
+ * signer). On testnet/local it uses anvil's prefunded test account.
  */
 
-const IS_MAINNET = import.meta.env.VITE_CHAIN_ENV === "mainnet";
-const IS_DEMO = import.meta.env.VITE_DEMO_MODE === "1";
+const IS_MAINNET = import.meta.env.VITE_CHAIN_ENV !== "testnet";
 
+// The demo wallet is always shown. On mainnet it has no private key
+// (read-only address; borrow flow uses the runtime's signer). On
+// testnet/local it uses anvil's prefunded test account.
 const walletGroups: Parameters<typeof connectorsForWallets>[0] = [
+  {
+    groupName: "Try the demo",
+    wallets: [demoWallet],
+  },
   {
     groupName: "Popular",
     wallets: [metaMaskWallet, coinbaseWallet, rainbowWallet, injectedWallet],
   },
 ];
-if (IS_DEMO) {
-  walletGroups.push({
-    groupName: "Demo",
-    wallets: [demoWallet],
-  });
-}
 
 const connectors = connectorsForWallets(walletGroups, {
   appName: "VANTA",

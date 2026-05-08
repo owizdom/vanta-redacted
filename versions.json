@@ -6,7 +6,7 @@
   "gradle": "8.10.2",
   "paper": "1.21.4",
   "kms": {
-    "appId": null,
+    "appId": "0x95F2AB29fAa9A4C834B06B0514428d63C6e0E80d",
     "publicKeySha256": null
   }
 }

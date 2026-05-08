@@ -96,11 +96,12 @@ export interface X402PluginOpts {
   readonly routes: readonly X402RouteConfig[];
   /** Treasury address — receiver of the payment. */
   readonly receiver: Address;
-  /** Base Sepolia USDC token. */
+  /** USDC token on the configured chain (Base mainnet 0x8335…2913). */
   readonly usdcAddress: Address;
-  /** Network label for the challenge body. */
-  readonly network: "base-sepolia";
-  /** Chain id (84532 for base-sepolia). */
+  /** Network label for the challenge body. Coinbase X402 spec strings:
+   *  `"base"` for Base mainnet, `"base-sepolia"` for testnet. */
+  readonly network: "base" | "base-sepolia";
+  /** Chain id (8453 for base, 84532 for base-sepolia). */
   readonly chainId: number;
   /** USDC EIP-712 domain name + version (USDC v2 → "USDC", "2"). */
   readonly tokenName: string;
@@ -129,7 +130,7 @@ export interface SettledPayment {
 interface X402PaymentEnvelope {
   readonly x402Version: number;
   readonly scheme: "exact";
-  readonly network: "base-sepolia";
+  readonly network: "base" | "base-sepolia";
   readonly payload: {
     readonly signature: Hex;
     readonly authorization: {
@@ -173,7 +174,7 @@ function parsePaymentHeader(raw: string): X402PaymentEnvelope | null {
     const env = JSON.parse(json) as X402PaymentEnvelope;
     if (env.x402Version !== 1) return null;
     if (env.scheme !== "exact") return null;
-    if (env.network !== "base-sepolia") return null;
+    if (env.network !== "base" && env.network !== "base-sepolia") return null;
     const a = env.payload?.authorization;
     if (!a || !a.from || !a.to || !a.value || !a.validBefore || !a.nonce) return null;
     return env;
@@ -300,14 +301,19 @@ async function settleOnChain(
   return { txHash, blockNumber: Number(receipt.blockNumber) };
 }
 
-/** Encode a settlement-receipt header for the client. */
-function encodeSettleResponse(info: { txHash: string; blockNumber: number }): string {
+/** Encode a settlement-receipt header for the client. The `network`
+ *  string follows Coinbase's X402 spec (`"base"` mainnet, `"base-sepolia"`
+ *  testnet) and must match the network we settled the EIP-3009 transfer on. */
+function encodeSettleResponse(
+  info: { txHash: string; blockNumber: number },
+  network: "base" | "base-sepolia",
+): string {
   const body = {
     x402Version: 1,
     success: true,
     transaction: info.txHash,
     blockNumber: info.blockNumber,
-    network: "base-sepolia",
+    network,
   };
   return Buffer.from(JSON.stringify(body), "utf8").toString("base64");
 }
@@ -388,7 +394,7 @@ export function installX402Hook(fastify: FastifyInstance, opts: X402PluginOpts):
       );
     }
 
-    reply.header("X-PAYMENT-RESPONSE", encodeSettleResponse(settled));
+    reply.header("X-PAYMENT-RESPONSE", encodeSettleResponse(settled, opts.network));
     if (opts.onSettled) {
       try {
         await opts.onSettled({

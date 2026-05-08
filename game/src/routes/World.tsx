@@ -128,17 +128,11 @@ export function World(): JSX.Element {
         </span>
       </header>
 
-      {/* top-right wallet + marketplace */}
+      {/* top-right wallet */}
       <div className="pointer-events-none absolute right-4 top-4 z-10 flex items-center gap-3">
         <span className="pointer-events-auto rounded-[2px] border border-ink-700 bg-ink-900/85 px-3 py-1.5">
           <MadeSovereignWith size="sm" />
         </span>
-        <Link
-          to="/marketplace"
-          className="pointer-events-auto rounded-[2px] border border-ink-700 bg-ink-900/85 px-3 py-1.5 font-mono text-xs uppercase tracking-[0.22em] text-chalk-300 hover:text-chalk-50"
-        >
-          marketplace
-        </Link>
         <div className="pointer-events-auto">
           <ConnectButton showBalance={false} chainStatus="icon" accountStatus="address" />
         </div>

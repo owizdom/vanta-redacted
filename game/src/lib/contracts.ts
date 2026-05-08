@@ -7,12 +7,13 @@ import { base, baseSepolia } from "wagmi/chains";
  * VANTA) so its address arrives via /api/agents/:id; only the ABI
  * is shared here.
  *
- * Chain selection: VITE_CHAIN_ENV=mainnet → Base mainnet (8453);
- * anything else → Base Sepolia (84532). Production Vercel build
- * sets VITE_CHAIN_ENV=mainnet.
+ * Chain selection: defaults to **Base mainnet** (8453). Set
+ * `VITE_CHAIN_ENV=testnet` to point at Base Sepolia (84532) for CI /
+ * local-anvil testing. Production Vercel build leaves VITE_CHAIN_ENV
+ * unset → mainnet.
  */
 
-const IS_MAINNET = import.meta.env.VITE_CHAIN_ENV === "mainnet";
+const IS_MAINNET = import.meta.env.VITE_CHAIN_ENV !== "testnet";
 
 export const CHAIN_ID = IS_MAINNET ? base.id : baseSepolia.id;
 
