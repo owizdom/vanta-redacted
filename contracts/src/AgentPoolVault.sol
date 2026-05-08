@@ -13,7 +13,7 @@ import {Ownable, Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step
 ///         agent's idle USDC + open-position notional value.
 /// @dev    Invariants:
 ///           - I-AP-1: `totalAssets() = USDC balance + openPositionsValueUsdc6`.
-///           - I-AP-2: asset is hard-pinned to canonical Base Sepolia USDC.
+///           - I-AP-2: asset is hard-pinned to canonical Base mainnet USDC.
 ///           - I-AP-3: `_decimalsOffset() == 6` — virtual shares neutralise
 ///             the classic ERC-4626 inflation attack.
 ///           - I-AP-4: `maxDeposit(any) == 0` once `totalAssets() >= maxAumUsdc6`.
@@ -26,8 +26,8 @@ import {Ownable, Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step
 contract AgentPoolVault is ERC4626, Ownable2Step {
     using SafeERC20 for IERC20;
 
-    /// @notice Canonical Base Sepolia USDC.
-    address public constant BASE_SEPOLIA_USDC = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
+    /// @notice Canonical Base mainnet USDC (Circle native).
+    address public constant BASE_USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
 
     /// @notice Stable identifier for this VANTA across the AgentRegistry.
     ///         All on-chain events emit this so consumers can filter by
@@ -69,7 +69,7 @@ contract AgentPoolVault is ERC4626, Ownable2Step {
     event TradeClosedReturn(uint256 proceedsUsdc6, uint256 exitNotionalUsdc6);
     event MarkedToMarket(uint256 newOpenPositionsValueUsdc6, uint256 timestamp);
 
-    /// @param asset_ Must equal `BASE_SEPOLIA_USDC` (I-AP-2).
+    /// @param asset_ Must equal `BASE_USDC` (I-AP-2).
     /// @param admin_ Initial owner — the per-VANTA TEE EOA.
     /// @param agentId_ Stable AgentRegistry id for this VANTA.
     /// @param maxAumUsdc6_ Per-VANTA AUM cap in USDC wei. Must be > 0.
@@ -83,7 +83,7 @@ contract AgentPoolVault is ERC4626, Ownable2Step {
         ERC4626(asset_)
         Ownable(admin_)
     {
-        if (address(asset_) != BASE_SEPOLIA_USDC) revert BadAsset(address(asset_));
+        if (address(asset_) != BASE_USDC) revert BadAsset(address(asset_));
         if (maxAumUsdc6_ == 0) revert MaxAumZero();
         agentId = agentId_;
         maxAumUsdc6 = maxAumUsdc6_;

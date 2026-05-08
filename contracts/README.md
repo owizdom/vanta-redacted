@@ -32,20 +32,21 @@ forge test -vvv
 
 ## Deployed addresses
 
-| Chain        | Chain id | Contract      | Address |
-| ------------ | -------- | ------------- | ------- |
-| base-sepolia | 84532    | LpVault       | _(unset)_ |
-| base-sepolia | 84532    | LoanBook      | _(unset)_ |
-| amoy         | 80002    | VantaVault    | _(unset)_ |
+| Chain        | Chain id | Contract   | Address                                      |
+| ------------ | -------- | ---------- | -------------------------------------------- |
+| base         | 8453     | LpVault    | `0xe2f93c448d9fc51155e2e06479b3b1e86f8ae45b` |
+| base         | 8453     | LoanBook   | `0x7ED4E98D460BBd7e43854cd93fD96d8E11b71954` |
+| polygon      | 137      | VantaVault | `0xe2f93c448d9fc51155e2e06479b3b1e86f8ae45b` |
 
-Live state is mirrored in `deployments/<chain>.json`.
+Live state is mirrored in `deployments/mainnet-<chain>.json`. Sepolia/Amoy
+testnet RPCs in `foundry.toml` are kept for CI / local-anvil only.
 
 ## Deploy
 
 Required env vars:
 
-- `BASE_SEPOLIA_RPC_URL` — Base Sepolia JSON-RPC endpoint.
-- `AMOY_RPC_URL` — Polygon Amoy JSON-RPC endpoint.
+- `BASE_RPC_URL` — Base mainnet JSON-RPC endpoint (or `BASE_SEPOLIA_RPC_URL` for testnet CI).
+- `POLYGON_RPC_URL` — Polygon mainnet JSON-RPC endpoint (or `AMOY_RPC_URL` for testnet CI).
 - `ETHERSCAN_API_KEY` — multi-chain key (Etherscan v2).
 - `DEPLOYER_PRIVATE_KEY` — funded EOA for the target chain.
 
@@ -54,21 +55,21 @@ The admin address is derived from `.vanta/dev-seed` (HKDF, info
 deployment scripts.
 
 ```
-# 1. LpVault on Base Sepolia
+# 1. LpVault on Base mainnet
 forge script script/01_LpVault.s.sol \
-  --rpc-url base_sepolia --broadcast --private-key $DEPLOYER_PRIVATE_KEY
+  --rpc-url base --broadcast --private-key $DEPLOYER_PRIVATE_KEY
 
-# 2. LoanBook on Base Sepolia
+# 2. LoanBook on Base mainnet
 forge script script/02_LoanBook.s.sol \
-  --rpc-url base_sepolia --broadcast --private-key $DEPLOYER_PRIVATE_KEY
+  --rpc-url base --broadcast --private-key $DEPLOYER_PRIVATE_KEY
 
 # 3. Wire LoanBook into LpVault (idempotent)
 forge script script/03_WireLoanBook.s.sol \
-  --rpc-url base_sepolia --broadcast --private-key $DEPLOYER_PRIVATE_KEY
+  --rpc-url base --broadcast --private-key $DEPLOYER_PRIVATE_KEY
 
-# 4. VantaVault on Amoy
+# 4. VantaVault on Polygon mainnet
 forge script script/04_VantaVault.s.sol \
-  --rpc-url amoy --broadcast --private-key $DEPLOYER_PRIVATE_KEY
+  --rpc-url polygon --broadcast --private-key $DEPLOYER_PRIVATE_KEY
 ```
 
 ## Layout

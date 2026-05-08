@@ -106,7 +106,7 @@ export async function runCli(opts: CliOptions): Promise<number> {
     .option("--json", "emit a single line of JSON instead of human output")
     .option(
       "--rpc <url>",
-      "Base Sepolia RPC URL for on-chain params_hash cross-check",
+      "Base RPC URL (mainnet by default) for on-chain params_hash cross-check",
     )
     .option(
       "--loan-book <addr>",

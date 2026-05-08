@@ -53,7 +53,10 @@ export const wagmiConfig = createConfig({
   },
 });
 
-declare module "wagmi" {
+// Augment `@wagmi/core`'s Register interface (not `wagmi`, which only
+// re-exports it as a type alias and triggers TS2300 on declaration
+// merging). Wagmi hooks pick up the strongly-typed config from this.
+declare module "@wagmi/core" {
   interface Register {
     config: typeof wagmiConfig;
   }
