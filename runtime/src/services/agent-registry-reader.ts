@@ -23,17 +23,35 @@
 
 import type { Address, PublicClient } from "viem";
 
+/**
+ * On-chain infrastructure status. v1 ships with a single shared LpVault
+ * + LoanBook on Base mainnet — three "agents" are three TEE-resident
+ * personas reasoning over the same pool. v2 deploys per-agent
+ * AgentPoolVault + PositionBook + OperationalCap + per-agent operator
+ * EOAs, at which point this flips to "per-agent" and the address fields
+ * stop being null. Surfacing the status honestly in the API stops the
+ * UI from rendering placeholder addresses as if they were real
+ * contracts.
+ */
+export type AgentInfraMode = "shared-pool-v1" | "per-agent-v2";
+
 export interface AgentSummary {
   readonly agent_id: number;
   readonly name: string;
   readonly thesis: string;
   readonly color_rgb: number; // 0xRRGGBB packed
+  /** Shared LpVault on v1; per-agent AgentPoolVault on v2. */
   readonly pool: Address;
-  readonly position_book: Address;
-  readonly op_cap: Address;
-  readonly operator: Address;
+  /** Per-agent PositionBook. Null in v1 (shared-pool); deployed contract in v2. */
+  readonly position_book: Address | null;
+  /** Per-agent OperationalCap. Null in v1; deployed contract in v2. */
+  readonly op_cap: Address | null;
+  /** Per-agent operator EOA. Null in v1 (admin EOA originates for all three). */
+  readonly operator: Address | null;
   readonly registered_at_unix: number;
   readonly paused: boolean;
+  /** v1 = shared pool, v2 = per-agent. Drives UI disclosure of what's deployed. */
+  readonly infra_mode: AgentInfraMode;
 }
 
 export interface AgentRecord extends AgentSummary {
@@ -65,10 +83,21 @@ export function createFixtureRegistryReader(
 }
 
 /**
- * The seed fixture every local-dev runtime ships with: VANTA-zero
- * (the original Claude-thesis agent) at the world origin. Two more
- * islands seeded so the marketplace UI renders something interesting
- * before any real registration happens.
+ * v1 shipping shape: three TEE-resident underwriting personas
+ * (Anthropic / OpenAI / Google) over a SINGLE shared LpVault + LoanBook
+ * on Base mainnet. The `pool` field is overridden at boot in `main.ts`
+ * to the live mainnet LpVault when `LP_VAULT_ADDRESS` is configured.
+ *
+ * Per-agent infrastructure (`AgentPoolVault` / `PositionBook` /
+ * `OperationalCap`) is NOT deployed in v1 — those are roadmap (the
+ * `AgentFactory.deploy()` atomic-deploy path lives in `contracts/src/`
+ * but isn't called yet). Surfacing those addresses as `null` in the
+ * registry stops the API from dressing placeholder addresses up as
+ * deployed contracts, and lets the marketplace UI disclose the v1
+ * shared-pool reality honestly.
+ *
+ * `island_offset` is a UI hint for the Three.js scene — three islands
+ * around the central plaza, no on-chain meaning.
  */
 export const DEFAULT_FIXTURE_AGENTS: readonly FixtureAgent[] = [
   {
@@ -77,12 +106,13 @@ export const DEFAULT_FIXTURE_AGENTS: readonly FixtureAgent[] = [
     thesis:
       "Anthropic Claude Opus thesis — macro / Fed / geopolitics markets where mid mispricing reflects retail attention bias.",
     color_rgb: 0x9b6bff,
-    pool: "0x0000000000000000000000000000000000000001",
-    position_book: "0x0000000000000000000000000000000000000002",
-    op_cap: "0x0000000000000000000000000000000000000003",
-    operator: "0x0000000000000000000000000000000000000004",
+    pool: "0x0000000000000000000000000000000000000000",
+    position_book: null,
+    op_cap: null,
+    operator: null,
     registered_at_unix: Math.floor(Date.UTC(2026, 4, 5) / 1000),
     paused: false,
+    infra_mode: "shared-pool-v1",
     image_digest:
       "0x0000000000000000000000000000000000000000000000000000000000000000",
     attestation_hash:
@@ -95,12 +125,13 @@ export const DEFAULT_FIXTURE_AGENTS: readonly FixtureAgent[] = [
     thesis:
       "OpenAI GPT-5 thesis — sport / weather / earnings markets where structured priors and short-horizon momentum dominate.",
     color_rgb: 0x4fae5a,
-    pool: "0x0000000000000000000000000000000000000005",
-    position_book: "0x0000000000000000000000000000000000000006",
-    op_cap: "0x0000000000000000000000000000000000000007",
-    operator: "0x0000000000000000000000000000000000000008",
+    pool: "0x0000000000000000000000000000000000000000",
+    position_book: null,
+    op_cap: null,
+    operator: null,
     registered_at_unix: Math.floor(Date.UTC(2026, 4, 5) / 1000),
     paused: false,
+    infra_mode: "shared-pool-v1",
     image_digest:
       "0x0000000000000000000000000000000000000000000000000000000000000000",
     attestation_hash:
@@ -113,12 +144,13 @@ export const DEFAULT_FIXTURE_AGENTS: readonly FixtureAgent[] = [
     thesis:
       "Google Gemini 2.5 Pro thesis — long-horizon technology + AI markets where slow-moving consensus drifts away from actual progress.",
     color_rgb: 0x4287f5,
-    pool: "0x0000000000000000000000000000000000000009",
-    position_book: "0x000000000000000000000000000000000000000a",
-    op_cap: "0x000000000000000000000000000000000000000b",
-    operator: "0x000000000000000000000000000000000000000c",
+    pool: "0x0000000000000000000000000000000000000000",
+    position_book: null,
+    op_cap: null,
+    operator: null,
     registered_at_unix: Math.floor(Date.UTC(2026, 4, 5) / 1000),
     paused: false,
+    infra_mode: "shared-pool-v1",
     image_digest:
       "0x0000000000000000000000000000000000000000000000000000000000000000",
     attestation_hash:
@@ -206,6 +238,10 @@ function tupleToRecord(t: OnChainAgentTuple, offset: readonly [number, number]):
     operator: t.operator,
     registered_at_unix: Number(t.registeredAt),
     paused: t.paused,
+    // v2: per-agent contracts are deployed and the registry is the
+    // source of truth. v1 path goes through the fixture reader which
+    // sets this to `shared-pool-v1`.
+    infra_mode: "per-agent-v2",
     image_digest: t.imageDigest,
     attestation_hash: t.attestationHash,
     island_offset: { x: offset[0], z: offset[1] },

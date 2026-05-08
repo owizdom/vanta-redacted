@@ -63,11 +63,6 @@ import {
   type PoolReader,
 } from "./services/pool-reader.js";
 import { createPledgeWatcher, type PledgeWatcher } from "./services/pledge-watcher.js";
-import { createFleetHost, type FleetHost } from "./services/fleet-host.js";
-import {
-  adaptInferenceClient,
-  type CouncilInferenceFn,
-} from "./services/npc-council.js";
 import { createCreditObserver } from "./services/credit-observer.js";
 import { createExposureReader } from "./services/exposure-reader.js";
 import { createMarkLoop } from "./services/mark-loop.js";
@@ -684,38 +679,13 @@ async function startMain(): Promise<void> {
     app.log.info({ loop: loop.name }, "reasoning_loop_started");
   }
 
-  // ----- Fleet host: per-VANTA lender credit loop with NPC council ------
-  // For each registered VANTA, spawn its own credit loop (lender mode)
-  // with an NPC council deliberating each tick. agent_id=0 is the
-  // "VANTA-zero" agent — we let the existing v2 creditLoop handle its
-  // boot.loanRegistry, so the fleet host's loansFor(0) returns []
-  // (avoids duplicate ticks). Per-agent registries land in v3.5 prod
-  // wiring; until then, agents 1+ also produce empty loan lists.
-  const fleetCouncilInferenceFor = (
-    agentId: number,
-  ): CouncilInferenceFn | null => {
-    return adaptInferenceClient({
-      client: boot.inference,
-      defaultParentId: boot.genesis.id,
-      npcBotHandle: `vanta-${String(agentId)}-npc`,
-    });
-  };
-  const fleetObserve = createCreditObserver({ marketsCache: boot.marketsCache });
-  const fleetHost: FleetHost = createFleetHost({
-    registry: v3Registry,
-    ctx,
-    loansFor: async () => [],
-    observeFor: (_agentId, loan) => fleetObserve(loan),
-    councilInferenceFor: fleetCouncilInferenceFor,
-    tickSeconds: 60,
-  });
-  await fleetHost.start();
-  for (const { agent_id } of fleetHost.loops()) {
-    app.log.info(
-      { fleet_loop: `credit-${String(agent_id)}` },
-      "fleet_loop_started",
-    );
-  }
+  // Multi-VANTA fleet host (per-agent credit loops + per-agent NPC
+  // councils) is roadmap. v1 ships one shared LpVault + LoanBook with
+  // three TEE-resident reasoning personas rotating on the ambient
+  // inference loop — there is no second or third on-chain agent to
+  // host. Re-introducing the fleet host requires AgentRegistry +
+  // AgentPoolVault + PositionBook + OperationalCap deploys via
+  // `contracts/src/AgentFactory.sol`.
 
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`vanta/runtime: received ${signal}, draining…`);
@@ -724,7 +694,6 @@ async function startMain(): Promise<void> {
       boot.marketsCache.stop();
       await pledgeWatcher.stop();
       await Promise.all(reasoningLoops.map((l) => l.stop()));
-      await fleetHost.stop();
       await markLoop.stop();
       await app.close();
     } catch (err: unknown) {

@@ -651,6 +651,36 @@ async function findGenesis(log: FileEventLog): Promise<VantaEvent | null> {
   return null;
 }
 
+const ZERO_HASH = "0".repeat(64);
+
+/**
+ * SHA-256 of the KMS public key PEM the live attestation anchor was
+ * verified against. Returns 64-zero hex when running in degraded mode
+ * (no live KMS) so verifiers can branch — *not* a silent placeholder.
+ */
+function kmsPublicKeyHash(tee: TeeState): ReturnType<typeof asSha256Hex> {
+  const anchor = tee.identityAnchor;
+  if (anchor === null) return asSha256Hex(ZERO_HASH);
+  const pem = anchor.kmsPublicKeyPem;
+  if (typeof pem !== "string" || pem.length === 0) {
+    return asSha256Hex(ZERO_HASH);
+  }
+  return asSha256Hex(createHash("sha256").update(pem, "utf8").digest("hex"));
+}
+
+/**
+ * SHA-256 of the live attestation JWT (compact JWS form). Same degraded
+ * fallback as `kmsPublicKeyHash`.
+ */
+function attestationJwtHashFromTee(tee: TeeState): ReturnType<typeof asSha256Hex> {
+  if (typeof tee.attestationJwt !== "string" || tee.attestationJwt.length === 0) {
+    return asSha256Hex(ZERO_HASH);
+  }
+  return asSha256Hex(
+    createHash("sha256").update(tee.attestationJwt, "utf8").digest("hex"),
+  );
+}
+
 /**
  * Build, sign, and persist a `constitutional.genesis` event over the
  * v1 baseline body. Idempotent: callers should only invoke this if
@@ -699,14 +729,16 @@ async function signAndPersistGenesis(args: {
     epoch: Math.floor(args.tee.bootedAt / 1000),
     tee: {
       signingPubKey: args.tee.signingPubKey,
-      kmsKeyHash: asSha256Hex(
-        // KMS public key hash: the canonical form is the SHA-256 of
-        // the PEM. In dev/degraded mode there may be no PEM; emit
-        // 64 zero-hex as a placeholder bound by the genesis body.
-        "0".repeat(64),
-      ),
+      // I-EV-7: kmsKeyHash binds the signing pubkey to the KMS that
+      // attested the enclave (sha256 over the KMS public key PEM, the
+      // exact bytes the launcher returned with the JWT). attestationJwtHash
+      // binds it to the specific JWT issued for this boot. Together they
+      // close the verifier chain: signing pubkey → enclave attestation →
+      // KMS → image digest. Zero-hex only when running in degraded mode
+      // (no live KMS), surfaced honestly so verifiers can branch on it.
+      kmsKeyHash: kmsPublicKeyHash(args.tee),
       tdxQuoteHash: null,
-      attestationJwtHash: asSha256Hex("0".repeat(64)),
+      attestationJwtHash: attestationJwtHashFromTee(args.tee),
     },
     instance: args.tee.identityAnchor?.kind === "kms-jwt"
       ? args.tee.identityAnchor.audience

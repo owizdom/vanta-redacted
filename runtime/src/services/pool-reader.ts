@@ -25,7 +25,12 @@ import type { Address, PublicClient } from "viem";
 export interface PoolState {
   readonly agent_id: number;
   readonly pool: Address;
-  readonly position_book: Address;
+  /**
+   * Per-agent PositionBook address. Null in v1 (shared-pool runtime —
+   * no per-agent position book deployed yet); a real Address in v2 when
+   * AgentRegistry / AgentFactory.deploy() are wired up.
+   */
+  readonly position_book: Address | null;
   readonly nav_usdc6: bigint;
   readonly total_supply: bigint;
   readonly share_price_e18: bigint;
@@ -45,7 +50,7 @@ export interface PoolReader {
 export interface FixturePoolStateInputs {
   readonly agent_id: number;
   readonly pool: Address;
-  readonly position_book: Address;
+  readonly position_book: Address | null;
   readonly nav_usdc6: bigint;
   readonly total_supply: bigint;
   readonly max_aum_usdc6: bigint;
@@ -121,7 +126,9 @@ export interface MinimalLpVaultReaderArgs {
   readonly client: PublicClient;
   readonly agent_id: number;
   readonly pool: Address;
-  readonly position_book: Address;
+  /** Null in v1 (no per-agent position book); reader stamps null
+   *  through into PoolState.position_book. */
+  readonly position_book: Address | null;
   readonly maxAumUsdc6?: bigint;
 }
 

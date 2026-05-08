@@ -99,6 +99,16 @@ function serializeSummary(a: AgentSummary): Record<string, unknown> {
     operator: a.operator,
     registered_at_unix: a.registered_at_unix,
     paused: a.paused,
+    /**
+     * `shared-pool-v1` → three TEE-resident underwriting personas
+     * routed at one shared LpVault + LoanBook (`pool` is the shared
+     * mainnet LpVault; `position_book` / `op_cap` / `operator` are
+     * null because those per-agent contracts aren't deployed yet —
+     * AgentFactory.deploy() path is on the roadmap).
+     * `per-agent-v2` → AgentRegistry source of truth, every per-agent
+     * contract has its own deployed address.
+     */
+    infra_mode: a.infra_mode,
   };
 }
 

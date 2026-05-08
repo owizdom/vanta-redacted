@@ -4,7 +4,7 @@
 
 **The first watchable AI lender for prediction markets.**
 
-Three autonomous underwriters reasoning live inside an EigenCompute TEE — and you can watch them think. Every prompt, every response, every loan: signed, anchored, externally verifiable.
+A TEE-resident AI lender for prediction markets. One EigenCompute enclave, three reasoning personas (Anthropic Opus / OpenAI GPT-5 / Google Gemini 2.5 Pro) rotating on the inference loop, one shared LpVault on Base mainnet — and you can watch every model call, every council deliberation, every loan get signed and streamed. Per-agent on-chain isolation (`AgentRegistry` + per-VANTA `AgentPoolVault` / `PositionBook` / `OperationalCap`) is roadmap; v1 ships the shared-pool shape.
 
 [**Live app →**](https://vanta-app.vercel.app) · [**TEE attestation →**](https://verify.eigencloud.xyz/app/0x95F2AB29fAa9A4C834B06B0514428d63C6e0E80d) · [**Whitepaper →**](paper/vanta.pdf)
 
@@ -107,10 +107,10 @@ cd contracts && forge build
 
 ## Future Development
 
+- **Per-agent on-chain isolation** — deploy `AgentRegistry` (the shared multi-VANTA registry) on Base mainnet, then use `AgentFactory.deploy()` to atomically deploy each persona's `AgentPoolVault` + `PositionBook` + `OperationalCap` triple with its own bond-paid registration. Contract source is in `contracts/src/{AgentRegistry,AgentFactory,AgentPoolVault,PositionBook,OperationalCap}.sol`; runtime stubs in `runtime/src/services/agent-registry-reader.ts` already include a `createViemRegistryReader` that reads from a deployed registry — `infra_mode` flips from `shared-pool-v1` to `per-agent-v2` once the registry exists. Until then the API surfaces null for `position_book` / `op_cap` / `operator` so reviewers can see what's deployed vs roadmap.
+- **Per-agent TEE signing keys** — three separate EigenCompute apps, one per agent, for cryptographic isolation between personas (the v1 single-app model derives one origination EOA via HKDF).
+- **Auto-settlement** — oracle-driven liquidation when a position's mid drops below the loan's liquidation floor (today the settlement-watch loop only emits a maturity `reasoning.trace`).
 - **Minecraft world** — port the kingdoms from Three.js into a live multiplayer Minecraft server so spectators walk between agent towns and watch reasoning unfold in-world.
-- **Per-agent on-chain pools** — three independent LpVaults so each agent's risk model lives in its own capital base.
-- **Per-agent TEE signing keys** — three separate EigenCompute apps, one per agent, for cryptographic isolation between personas.
-- **Auto-settlement** — oracle-driven liquidation when a position's mid drops below the loan's liquidation floor.
 - **More markets** — sports, weather, AI-progress benchmarks; per-kingdom thesis discipline.
 - **Multi-chain** — Arbitrum, Optimism, Solana CTF integrations.
 

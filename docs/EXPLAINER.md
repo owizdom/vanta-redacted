@@ -4,7 +4,7 @@
 
 **The first watchable AI lender for prediction markets.**
 
-Three autonomous underwriters reasoning live inside an EigenCompute TEE — and you can watch them think. Every prompt, every response, every loan: signed, anchored, externally verifiable.
+A TEE-resident AI lender for prediction markets. One EigenCompute enclave runs three underwriting personas (Anthropic Opus / OpenAI GPT-5 / Google Gemini 2.5 Pro) over a shared LpVault on Base mainnet — every prompt, response, and loan signed and streamed. Per-agent on-chain isolation is roadmap.
 
 [**Live**](https://vanta-app.vercel.app) · [**Verify**](https://verify.eigencloud.xyz/app/0x95F2AB29fAa9A4C834B06B0514428d63C6e0E80d) · [**Whitepaper**](../paper/vanta.pdf)
 
@@ -16,7 +16,7 @@ Three autonomous underwriters reasoning live inside an EigenCompute TEE — and 
 
 ## What it is
 
-VANTA is a **fleet of autonomous lenders** for prediction-market positions. You hold a Polymarket bet, you don't want to sell, but you want cash now — VANTA lends you USDC against it. The agents run by themselves: they read live markets, deliberate with an in-world underwriting council, decide whether to lend and at what rate, and run the loan from origination to settlement. They live inside hardware-secured enclaves so anyone can verify they're behaving the way they say they are.
+VANTA is **an autonomous lender** for prediction-market positions. You hold a Polymarket bet, you don't want to sell, but you want cash now — VANTA lends you USDC against it. The agent runs by itself: reads live markets, deliberates with an in-world underwriting council, decides whether to lend and at what rate, and runs the loan from origination to settlement. It lives inside a hardware-secured enclave so anyone can verify it's behaving the way it says it is. v1 ships **one enclave running three reasoning personas (Opus / GPT-5 / Gemini 2.5 Pro) that rotate on the inference loop and route their loans at one shared LpVault on Base mainnet**; the per-agent on-chain isolation pattern (`AgentRegistry` + `AgentFactory.deploy()` for each persona's own `AgentPoolVault` / `PositionBook` / `OperationalCap`) is the next deploy.
 
 Three agents launch on day one, each one a kingdom on a single shared 3D world you can walk through in your browser:
 
@@ -202,10 +202,10 @@ It's now a question of attracting LPs and borrowers to actually use it.
 
 ## Future development
 
+- **Per-agent on-chain isolation** — deploy `AgentRegistry` on Base mainnet, then call `AgentFactory.deploy()` once per persona to atomically create that persona's `AgentPoolVault` (per-agent ERC-4626 over USDC) + `PositionBook` (per-agent open-position accountant) + `OperationalCap` (immutable weekly spend cap) and register on chain. Source already lives in `contracts/src/`. After this deploy, `/api/agents` flips from `infra_mode: shared-pool-v1` to `per-agent-v2` and per-VANTA TVL diverges. v1 ships shared-pool because deploying four contracts before having a single real loan would have been theatre.
+- **Per-agent TEE signing keys** — three separate EigenCompute apps, one per agent, for cryptographic isolation between personas (today the v1 single-app derives one origination EOA via HKDF and the three personas all sign with the same Ed25519 keypair).
+- **Auto-settlement** — oracle-driven liquidation when a position's mid drops below the loan's liquidation floor (today the settlement-watch loop only emits a maturity `reasoning.trace` event so operators can act manually).
 - **Minecraft world** — port the kingdoms from Three.js into a live multiplayer Minecraft server so spectators walk between agent towns and watch reasoning unfold in-world.
-- **Per-agent on-chain pools** — three independent LpVaults so each agent's risk model lives in its own capital base.
-- **Per-agent TEE signing keys** — three separate EigenCompute apps, one per agent, for cryptographic isolation between personas.
-- **Auto-settlement** — oracle-driven liquidation when a position's mid drops below the loan's liquidation floor.
 - **More markets** — sports, weather, AI-progress benchmarks; per-kingdom thesis discipline.
 - **Multi-chain** — Arbitrum, Optimism, Solana CTF integrations.
 
@@ -213,4 +213,4 @@ It's now a question of attracting LPs and borrowers to actually use it.
 
 ## In one line
 
-VANTA is what an autonomous lending firm looks like when the entire firm is one verifiable program — a fleet of agents, each one a kingdom of named townsfolk who deliberate every loan, every prompt and response signed by the hardware they run on, every decision walkable from a single event id back to the model call that started it.
+VANTA is what an autonomous lending firm looks like when the entire firm is one verifiable program — one TEE, three reasoning personas deliberating every loan with named townsfolk, every prompt and response signed by the hardware it runs on, every decision walkable from a single event id back to the model call that started it.
