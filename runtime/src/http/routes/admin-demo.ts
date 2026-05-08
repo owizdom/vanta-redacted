@@ -149,6 +149,12 @@ export async function registerAdminDemoRoutes(
         traceId: result.traceId,
         principalUsdc6: result.principalUsdc6,
         haircutBps: result.haircutBps,
+        // Receipt-card fields. `txHash` is synthesised on the demo path
+        // (no real Base mainnet broadcast); the real-wallet flow returns
+        // the actual on-chain hash via /api/origination instead.
+        txHash: result.txHash,
+        teeAddress: app.bootstrap.origination.address,
+        borrower,
       };
     } catch (err) {
       app.log.error({ err }, "demo_borrow_failed");

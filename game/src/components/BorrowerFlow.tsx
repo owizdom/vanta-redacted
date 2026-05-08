@@ -39,7 +39,21 @@ interface Props {
 type FormStage =
   | { kind: "input" }
   | { kind: "submitting"; step?: string }
-  | { kind: "submitted"; loanId: string; principalUsdc6: string; haircutBps: number; real?: boolean; txHash?: string }
+  | {
+      kind: "submitted";
+      loanId: string;
+      principalUsdc6: string;
+      haircutBps: number;
+      real?: boolean;
+      txHash?: string;
+      /** loan.origination event id — the audit-chain root for this loan. */
+      originationId?: string;
+      /** TEE-derived EOA that signed the origination event + (real path) the chain tx. */
+      teeAddress?: string;
+      /** Borrower wallet — echoed back from the runtime so the receipt
+       *  card can show "loan to ..." without re-reading wagmi state. */
+      borrower?: string;
+    }
   | { kind: "denied"; reason: string }
   | { kind: "error"; message: string };
 
@@ -308,7 +322,16 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
         }),
       });
       const data = (await r.json()) as
-        | { ok: true; loanId: string; principalUsdc6: string; haircutBps: number }
+        | {
+            ok: true;
+            loanId: string;
+            principalUsdc6: string;
+            haircutBps: number;
+            originationId?: string;
+            txHash?: string;
+            teeAddress?: string;
+            borrower?: string;
+          }
         | { error: string; message?: string };
       if (!r.ok || !("ok" in data && data.ok)) {
         const reason =
@@ -323,6 +346,10 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
         loanId: data.loanId,
         principalUsdc6: data.principalUsdc6,
         haircutBps: data.haircutBps,
+        ...(data.originationId !== undefined ? { originationId: data.originationId } : {}),
+        ...(data.txHash !== undefined ? { txHash: data.txHash } : {}),
+        ...(data.teeAddress !== undefined ? { teeAddress: data.teeAddress } : {}),
+        ...(data.borrower !== undefined ? { borrower: data.borrower } : {}),
       });
     } catch (err) {
       setStage({
@@ -554,27 +581,7 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
           </button>
 
           {stage.kind === "submitted" ? (
-            <div className="mt-3 rounded-[2px] border border-signal-green/60 bg-signal-green/10 p-3 font-mono text-[10px]">
-              <div className="text-signal-green">
-                {stage.real ? "✓ on-chain" : "approved"} · loan {stage.loanId.slice(0, 12)}…
-              </div>
-              <div className="mt-1 text-chalk-300">
-                ${(Number(stage.principalUsdc6) / 1_000_000).toLocaleString()} USDC sent to your wallet
-                <span className="ml-2 text-chalk-500">
-                  · haircut {(stage.haircutBps / 100).toFixed(0)}%
-                </span>
-              </div>
-              {stage.txHash ? (
-                <a
-                  href={`https://basescan.org/tx/${stage.txHash}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-1 block text-chalk-500 hover:text-chalk-300"
-                >
-                  loanbook tx {stage.txHash.slice(0, 10)}…{stage.txHash.slice(-6)} ↗
-                </a>
-              ) : null}
-            </div>
+            <ApprovalReceipt stage={stage} kingdom={kingdom} onDismiss={onClose} />
           ) : null}
           {stage.kind === "denied" ? (
             <div className="mt-3 rounded-[2px] border border-signal-red/50 bg-signal-red/10 p-3 font-mono text-[10px] text-signal-red">
@@ -622,6 +629,152 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
             </ul>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ApprovalReceipt — fixed-position popup that overlays the modal once a
+// loan submission lands. Shows the audit-chain identifiers a verifier
+// cares about: the TEE-derived signer (origination EOA), the
+// loan.origination event id (the audit-chain root for this loan), the
+// on-chain or synthesised tx hash with a Basescan link, and the
+// borrower wallet. Click outside or press the X to dismiss.
+// ---------------------------------------------------------------------------
+
+interface ApprovalReceiptProps {
+  readonly stage: Extract<FormStage, { kind: "submitted" }>;
+  readonly kingdom: Kingdom;
+  readonly onDismiss: () => void;
+}
+
+function ApprovalReceipt({ stage, kingdom, onDismiss }: ApprovalReceiptProps): JSX.Element {
+  const principal = (Number(stage.principalUsdc6) / 1_000_000).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const haircutPct = (stage.haircutBps / 100).toFixed(1);
+  // Real path → live Basescan link. Demo path → no real tx; we still
+  // show the synthesised hash for narrative completeness but suppress
+  // the (broken) explorer link.
+  const txExplorerHref =
+    stage.real === true && stage.txHash
+      ? `https://basescan.org/tx/${stage.txHash}`
+      : null;
+  const eventVerifyHref = stage.originationId
+    ? `https://verify.eigencloud.xyz/app/0x95F2AB29fAa9A4C834B06B0514428d63C6e0E80d`
+    : null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Loan approved"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/85 px-6 backdrop-blur-sm"
+      onClick={onDismiss}
+    >
+      <div
+        className="w-full max-w-[460px] rounded-[3px] border border-signal-green/55 bg-ink-900 p-5 shadow-[0_0_50px_-10px_rgba(120,255,170,0.4)]"
+        style={{ borderColor: `${kingdom.color}88` }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.22em] text-signal-green">
+            <span className="text-base leading-none">✓</span>
+            <span>{stage.real === true ? "loan originated on chain" : "loan approved"}</span>
+          </div>
+          <button
+            onClick={onDismiss}
+            aria-label="Close"
+            className="rounded-[2px] border border-ink-700 px-2 py-0.5 font-mono text-[10px] text-chalk-500 hover:bg-ink-800 hover:text-chalk-200"
+          >
+            ×
+          </button>
+        </div>
+
+        <div
+          className="mt-3 rounded-[2px] border border-ink-700 bg-ink-800/60 p-3"
+          style={{ borderColor: `${kingdom.color}33` }}
+        >
+          <div className="font-mono text-[9px] uppercase tracking-[0.22em] text-chalk-500">
+            principal
+          </div>
+          <div className="mt-0.5 font-mono text-[18px] text-chalk-100">
+            ${principal} <span className="text-[11px] text-chalk-500">USDC</span>
+          </div>
+          <div className="mt-0.5 font-mono text-[10px] text-chalk-500">
+            haircut {haircutPct}% · underwritten by {kingdom.displayName}
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-2 font-mono text-[10.5px]">
+          <ReceiptRow label="signed event" value={stage.originationId ?? stage.loanId} href={eventVerifyHref} />
+          <ReceiptRow
+            label="tx hash"
+            value={stage.txHash ?? "n/a"}
+            href={txExplorerHref}
+            sub={stage.real === true ? null : "synthesised (demo path · no on-chain broadcast)"}
+          />
+          <ReceiptRow label="signed by" value={stage.teeAddress ?? "(unset)"} sub="TEE-derived origination EOA" />
+          <ReceiptRow label="borrower" value={stage.borrower ?? "(unset)"} />
+        </div>
+
+        <div className="mt-5 flex gap-2">
+          <button
+            onClick={onDismiss}
+            className="flex-1 rounded-[2px] border border-ink-700 bg-ink-800 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-chalk-300 hover:bg-ink-700"
+          >
+            close
+          </button>
+          {eventVerifyHref ? (
+            <a
+              href={eventVerifyHref}
+              target="_blank"
+              rel="noreferrer"
+              className="flex-1 rounded-[2px] border border-signal-green/40 bg-signal-green/15 px-3 py-2 text-center font-mono text-[10px] uppercase tracking-[0.18em] text-signal-green hover:bg-signal-green/25"
+            >
+              verify on eigencloud ↗
+            </a>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ReceiptRowProps {
+  readonly label: string;
+  readonly value: string;
+  readonly href?: string | null;
+  readonly sub?: string | null;
+}
+
+function ReceiptRow({ label, value, href, sub }: ReceiptRowProps): JSX.Element {
+  const display = value.length > 22 ? `${value.slice(0, 12)}…${value.slice(-6)}` : value;
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-b border-ink-700 pb-1.5 last:border-b-0 last:pb-0">
+      <div className="text-[9px] uppercase tracking-[0.22em] text-chalk-500 shrink-0">
+        {label}
+      </div>
+      <div className="text-right">
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            className="text-chalk-100 hover:text-signal-green"
+          >
+            {display} <span className="text-[9px]">↗</span>
+          </a>
+        ) : (
+          <span className="text-chalk-100">{display}</span>
+        )}
+        {sub ? (
+          <div className="mt-0.5 text-[9px] text-chalk-500 normal-case tracking-normal">
+            {sub}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -803,6 +956,9 @@ async function runRealBorrow(args: RealBorrowArgs): Promise<void> {
         blockNumber: number;
         haircutBps: number;
         principalUsdc6: string;
+        eventId?: string;
+        teeAddress?: string;
+        borrower?: string;
       }
     | { error: string };
   if (!origRes.ok || "error" in origBody) {
@@ -816,6 +972,9 @@ async function runRealBorrow(args: RealBorrowArgs): Promise<void> {
     haircutBps: origBody.haircutBps,
     real: true,
     txHash: origBody.txHash,
+    ...(origBody.eventId !== undefined ? { originationId: origBody.eventId } : {}),
+    ...(origBody.teeAddress !== undefined ? { teeAddress: origBody.teeAddress } : {}),
+    ...(origBody.borrower !== undefined ? { borrower: origBody.borrower } : {}),
   });
 }
 

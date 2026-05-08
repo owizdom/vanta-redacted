@@ -95,6 +95,10 @@ interface OriginationReply {
   haircutBps: number;
   principalUsdc6: string;
   paramsHash: string;
+  /** TEE-derived EOA that signed the on-chain LoanBook.originate tx. */
+  teeAddress: string;
+  /** Borrower wallet (== pledge event's borrower_proxy). */
+  borrower: string;
 }
 
 export async function registerOriginationRoute(
@@ -231,6 +235,12 @@ export async function registerOriginationRoute(
           haircutBps: q.haircutBps,
           principalUsdc6: q.principalUsdc6.toString(),
           paramsHash: receipt.params_hash,
+          // Receipt-card fields. `teeAddress` is the EOA that signed the
+          // on-chain LoanBook.originate tx (== HKDF-derived origination
+          // EOA). `borrower` is the pledge event's `borrower_proxy`,
+          // which the frontend renders on the approval card.
+          teeAddress: app.bootstrap.origination.address,
+          borrower,
         };
       } catch (err: unknown) {
         reply.status(500);

@@ -65,6 +65,12 @@ export interface DemoBorrowResult {
   readonly traceId: Sha256Hex;
   readonly principalUsdc6: string;
   readonly haircutBps: number;
+  /** Synthesised tx hash used in the loan.origination event body.
+   *  Lets the post-approval card render a deterministic "receipt"
+   *  identifier even though no real Base mainnet tx is broadcast on
+   *  the demo path. Real-wallet flow returns the actual on-chain
+   *  hash via /api/origination instead. */
+  readonly txHash: Sha256Hex;
 }
 
 // ---------------------------------------------------------------------------
@@ -428,5 +434,6 @@ export async function emitDemoBorrow(
     traceId,
     principalUsdc6: req.principalUsdc6.toString(),
     haircutBps: 6_500,
+    txHash,
   };
 }
