@@ -70,7 +70,7 @@ Where Gondor's Curator Sits}
 \noindent
 Polymarket crossed \$10B in monthly trading volume and \$500M in open interest by March 2026~\cite{polymarket-volume,polymarket-oi}, but the lending layer Polymarket itself shipped --- PolyLend~\cite{polylend} --- holds \$156. The bottleneck is not appetite; it is risk-management bandwidth. Gondor.fi (\$2.5M pre-seed, December 2025, with participation from Prelude Ventures, Castle Island Ventures, and Maven11~\cite{gondor-seed}) closes part of the gap with a curated beta: 50\% LTV USDC loans against Polymarket ERC-1155 positions, three risk-bucket funds (10\%/20\%/30\% interest caps), markets hand-selected and rebalanced by the team.
 
-VANTA is the autonomous risk engine that sits where Gondor's curator sits. Same product, different brain. The brain is a sovereign agent running three continuous reasoning loops --- credit, model, operational (\S\ref{sec:loops}) --- above a deterministic floor of formula-priced haircuts (\S\ref{sec:haircut}) and contract-enforced onboarding gates (\S\ref{sec:onboard}). The floor sets what the contract will accept; the reasoning sets what the agent proposes within that envelope --- per-market caps inside the \$25k probation ceiling, calibration-drift flags to lender governance, per-loan health monitoring, cluster-correlation alerts above the explicit tag system. Every reasoning step is a typed signed event with full input provenance; the chain-of-thought is auditable and bounded, not opaque. The agent runs inside an EigenCompute Intel TDX enclave; its Ed25519 signing key is generated in enclave RAM at boot and never leaves. The on-chain contracts (\texttt{LpVault}, \texttt{LoanBook}, \texttt{VantaVault}) are owned by an address only the running enclave image can derive. The team's role shifts from ongoing fund manager to one-time image publisher; trust shrinks from operational to one-time auditor review.
+VANTA is the autonomous risk engine that sits where Gondor's curator sits. Same product, different brain. The brain is a sovereign agent running three continuous reasoning loops --- credit, model, operational (\S\ref{sec:loops}) --- above a deterministic floor of formula-priced haircuts (\S\ref{sec:haircut}) and contract-enforced onboarding gates (\S\ref{sec:onboard}). The floor sets what the contract will accept; the reasoning sets what the agent proposes within that envelope --- per-market caps inside the \$25k probation ceiling, calibration-drift flags to lender governance, per-loan health monitoring, cluster-correlation alerts above the explicit tag system. Every reasoning step is a typed signed event with full input provenance; the chain-of-thought is auditable and bounded, not opaque. The agent runs inside an EigenCompute Intel TDX enclave; its Ed25519 signing key is generated in enclave RAM at boot and never leaves. The on-chain contracts (\texttt{LpVault}, \texttt{LoanBook}, \texttt{VantaVault}) are owned by an address only the running enclave image can derive. The team's role shifts from ongoing fund manager to one-time image publisher; trust shrinks from operational to one-time auditor review. Beyond lending, VANTA also operates as a Service Agent under the X402 protocol (\S\ref{sec:commerce}): it self-funds its own model inference through the Eigen AI Gateway and, in turn, sells signed quotes and marks to other agents in USDC on Base mainnet, with both flows recorded on the same canonical log as the loans themselves.
 
 We make four claims, in descending strength of evidence. First, the addressable market splits cleanly: a \emph{formalizable subset} of Polymarket (standard templates, whitelisted resolvers, $\geq 14$ days old) where curation reduces to gates plus bounded reasoning, and a \emph{hard subset} (novel templates, correlated baskets, custom resolvers) where human curation remains the correct tool. VANTA owns the formalizable subset; we explicitly defer the hard subset to lender-governance upgrades, not to the agent. Second, the resolution-aware haircut is a more honest pricing of tail risk than three buckets on the markets where its inputs are well-defined. Third, continuous agent reasoning --- not a periodic script over hard-coded gates --- is the correct shape for live risk: collateral prices, dispute behavior, and cluster correlations evolve between gate cycles, and the three loops respond to that evolution above the contract floor. Fourth, an attestation-liveness exit gives lenders a custody guarantee Gondor cannot offer: withdraw-only mode that activates without admin signatures if the enclave goes silent.
 
@@ -180,13 +180,13 @@ On a 250{,}000 USDC notional, collateral value is $0.60 \cdot 0.83 \cdot 250{,}0
 \section{Origination: Two Signatures, Post-Image}
 \label{sec:settlement}
 
-Originating a loan requires two signatures. The borrower signs an EIP-712 acceptance binding $(\text{loanId}, \text{principal}, \text{haircutBps}, \text{maturityTs})$. The runtime, holding the agent's HKDF-derived secp256k1 admin key, broadcasts \texttt{LoanBook.originate(...)} on Base Sepolia. The contract recomputes and stamps $\text{paramsHash} = \text{keccak256}(\text{abi.encode}(\text{borrower}, \text{principal}, \text{haircutBps}, \text{maturityTs}))$ on the loan record.
+Originating a loan requires two signatures. The borrower signs an EIP-712 acceptance binding $(\text{loanId}, \text{principal}, \text{haircutBps}, \text{maturityTs})$. The runtime, holding the agent's HKDF-derived secp256k1 admin key, broadcasts \texttt{LoanBook.originate(...)} on Base mainnet. The contract recomputes and stamps $\text{paramsHash} = \text{keccak256}(\text{abi.encode}(\text{borrower}, \text{principal}, \text{haircutBps}, \text{maturityTs}))$ on the loan record.
 
 Only \emph{after} the broadcast confirms at depth $\geq 2$ does the runtime sign the \texttt{loan.origination} event into the log, with \texttt{(txHash, blockNumber, blockHash, paramsHash)} embedded. This is the post-image pattern: a crash mid-flight leaves no phantom origination, because the event isn't written until the chain has confirmed.
 
 The verifier (CLI: \texttt{vanta-verify <url>}) cross-checks every \texttt{loan.origination} event against on-chain \texttt{LoanBook.loans(loanId).paramsHash}. Mismatch is a hard fail. Same guarantee whether the verifier runs on the lender's laptop or in CI.
 
-\textbf{Pledge mechanics.} VANTA supports Polymarket as its first venue. Polymarket users hold CTF positions through Gnosis Safe proxy wallets~\cite{polymarket-proxy}. Primary path: borrower's proxy calls \texttt{safeTransferFrom} into VantaVault on Polygon Amoy for the loan duration --- the PolyLend pattern~\cite{polylend}. Secondary path: revocable approval (\texttt{setApprovalForAll(VantaVault, true)}); priced at $5\times$ the escrow haircut floor.
+\textbf{Pledge mechanics.} VANTA supports Polymarket as its first venue. Polymarket users hold CTF positions through Gnosis Safe proxy wallets~\cite{polymarket-proxy}. Primary path: borrower's proxy calls \texttt{safeTransferFrom} into VantaVault on Polygon mainnet for the loan duration --- the PolyLend pattern~\cite{polylend}. Secondary path: revocable approval (\texttt{setApprovalForAll(VantaVault, true)}); priced at $5\times$ the escrow haircut floor.
 
 \textbf{Settlement.} On the underlying market's resolution, the pledged position pays out via Polymarket's CTF; \texttt{LoanBook.markRepaid} pulls principal back into LpVault via OpenZeppelin's \texttt{SafeERC20.safeTransferFrom}; the residual is the borrower's. \texttt{markLiquidated(loanId, auctionEscrow, proceeds)} is the analogous path for forced settlement.
 
@@ -290,7 +290,7 @@ The onboarding cycle (\S\ref{sec:onboard}) is one of three continuous loops the 
 
 \textbf{Model loop.} The haircut formula (\S\ref{sec:haircut}) has a closed form, but its parameters $(\alpha, \beta, \gamma, \tau_{\mathrm{gap}})$ are calibrated against a public dataset of resolved markets. The model loop runs adversarial replay weekly: synthetic borrowers attempt to select into mispriced loans across a generated stress portfolio (election shocks, dispute clusters, oracle-resolution disagreements), and the agent records realized loss-given-default versus the formula's pre-loss prediction. When realized error exceeds a calibrated band, the loop emits a \texttt{CalibrationProposal} event carrying the proposed parameters, the dataset slice that triggered it, and the realized-vs-predicted distribution. The proposal is \emph{not} self-actuating: it is an input to the 4-of-7 lender-quorum multisig, gated by the 7-day timelock of T8. The agent reasons; the lenders vote; the contract delays.
 
-\textbf{Operational loop.} The agent pays its own bills (Invariant~6). The treasury wallet (\texttt{vanta-treasury-v1}) receives oracle and origination fees; the operational loop reasons over runway, gas-price evolution on Base and Polygon Amoy, EigenCompute hosting renewals, LLM inference cost, and oracle-read amortization. When projected runway falls below a defined threshold, the loop emits a \texttt{TreasuryAlert}; when costs spike anomalously (gas above the 95th percentile of the trailing 30 days, inference cost step-change), the loop emits an \texttt{OperationalAnomaly}. Neither event triggers a contract action; both are inputs to the lender multisig and to the verifier audit. The agent's own economic survival is part of its reasoning surface.
+\textbf{Operational loop.} The agent pays its own bills (Invariant~6). The treasury wallet (\texttt{vanta-treasury-v1}, \texttt{0x667E3116C7eA909f97dD35167c2927BfAf744B7F}) receives origination fees, oracle fees, and X402 service-agent inflows from signed quotes and marks sold to other agents (\S\ref{sec:commerce}); the operational loop reasons over runway, gas-price evolution on Base and Polygon mainnet, EigenCompute hosting renewals, LLM inference cost, and oracle-read amortization. When projected runway falls below a defined threshold, the loop emits a \texttt{TreasuryAlert}; when costs spike anomalously (gas above the 95th percentile of the trailing 30 days, inference cost step-change), the loop emits an \texttt{OperationalAnomaly}. Neither event triggers a contract action; both are inputs to the lender multisig and to the verifier audit. The agent's own economic survival is part of its reasoning surface.
 
 \textbf{What the loops are not.} They are not autonomous fund management. None of the three loops can move funds, change formula parameters in production, or onboard markets outside the \S\ref{sec:onboard} envelope. The credit loop can request a per-market freeze; only the depositor-bond mechanism executes one. The model loop can propose recalibration; only the multisig's timelocked quorum can apply one. The operational loop can flag treasury risk; only governance can respond. The reasoning is bounded at every layer.
 
@@ -324,13 +324,52 @@ VANTA runs inside one EigenCompute Intel TDX enclave. At boot, the runtime calls
   \item \texttt{vanta-api-credentials-v1} --- encryption key for in-enclave API credentials.
 \end{itemize}
 
-All five derivations happen inside the enclave; none of the derived keys leave it. The current deployments are on testnets: \texttt{LpVault} at \texttt{0xD9AFC3abC151239B047F653e0493792ecEB0f076} on Base Sepolia, \texttt{LoanBook} at \texttt{0xA6004cb25ce50baEDa38017B81577FA2419a876f} on Base Sepolia, \texttt{VantaVault} at \texttt{0xD9AFC3abC151239B047F653e0493792ecEB0f076} on Polygon Amoy. All three are owned by \texttt{0x8275001D7618263304B76Ed621150cE4193826e6}, the address derived inside the enclave. EigenCompute App ID is \texttt{0xaa4875Ff1514b8227Dc61466473c0B1E4C83CAf9}.
+All five derivations happen inside the enclave; none of the derived keys leave it. The current deployments are on mainnet: \texttt{LpVault} at \texttt{0xe2f93c448d9fc51155e2e06479b3b1e86f8ae45b} on Base, \texttt{LoanBook} at \texttt{0x7ed4e98d460bbd7e43854cd93fd96d8e11b71954} on Base, \texttt{VantaVault} at \texttt{0xe2f93c448d9fc51155e2e06479b3b1e86f8ae45b} on Polygon. All three are owned by the in-enclave admin address \texttt{0x2F86357658C5CF8A5D2221b9935412C880476B14}; the X402 service-agent treasury \texttt{0x667E3116C7eA909f97dD35167c2927BfAf744B7F} is HKDF-derived under a separate info string so a metering breach cannot mint loans. EigenCompute App ID on \texttt{mainnet-alpha} is \texttt{0x95F2AB29fAa9A4C834B06B0514428d63C6e0E80d}, anchored on Ethereum mainnet.
 
 \textbf{What ``verifiable'' actually means here.} Eigen's attestation chain proves the running code's measurement matches the published image's measurement, byte-for-byte. The depositor checks this in one of two ways. The honest way: an auditor publishes a build of the image, derives the measurement, and signs a statement that the measurement equals the running attestation. The depositor trusts the auditor, not the team. The aspirational way: the depositor reproduces the build themselves. We do not pretend many depositors will. The trust shift VANTA actually provides is from \emph{ongoing operational trust} (Gondor: ``the team uses the feed honestly today and tomorrow and next month'') to \emph{one-time auditor review} (VANTA: ``the auditor checked the image; the running code is what the image was''). That is a real reduction; it is not the elimination of trusted parties.
 
 \textbf{Sovereignty gap.} EigenCompute's KMS today is a single-vendor (GCP Confidential Space) HMAC root: whoever holds \texttt{upgradeApp} can mint a new image with the same HKDF-derived secrets. Mitigation: the Ed25519 signing key is freshly generated per boot and is \emph{not} HKDF-derived from \texttt{MNEMONIC}, so a malicious image fork breaks the signature chain visibly in the event log. The attestation-liveness exit (Invariant~5) makes this a recoverable failure mode, not a stranded-funds one. Stewards multisig + 7-day timelock on \texttt{upgradeApp}; conservative TVL ceiling until single-vendor KMS is replaced.
 
 \textbf{What the verifier actually checks.} The off-chain CLI \texttt{vanta-verify} reads \texttt{/api/events/:id}, walks the chain to genesis, verifies each Ed25519 signature with strict RFC 8032, and for every \texttt{loan.origination} or \texttt{loan.onboarding} event cross-checks the on-chain \texttt{paramsHash}. Eight artifacts a thorough verifier checks: the agent's signing public key, the EigenCompute attestation JWT, the current live risk model and history, the signed event log, the agent's treasury state, the on-chain \texttt{LpVault} state, the per-market onboarding cap registry, and the published image build instructions.
+
+% =========================================================
+\section{Agent Commerce: A Paid Service Surface}
+\label{sec:commerce}
+
+VANTA is two economic roles at once. The first role is borrower-facing: the agent originates loans and earns fees on principal. The second role is provider-facing: the agent itself sells signed work to other agents and to humans, settling in USDC on Base mainnet. Both flows credit the same in-enclave-derived treasury wallet, and both surface as typed signed events on the same canonical log.
+
+\textbf{The metered surface.} The runtime exposes two HTTP endpoints under the Coinbase X402 protocol~\cite{coinbase-x402} (\texttt{exact} scheme, EIP-3009 USDC~\cite{eip3009}):
+
+\begin{itemize}[leftmargin=*,itemsep=2pt,topsep=2pt]
+  \item \texttt{POST /bridge/wizard/quote} --- a TEE-signed haircut quote for a Polymarket position; \$0.05 USDC; the response body carries the issuer pubkey, the formula inputs, the recommended haircut, the maximum loan, and an Ed25519 signature over the canonical-JSON inner.
+  \item \texttt{GET /mark/:market\_id} --- a TEE-signed 30-minute TWAP read for a market; \$0.001 USDC.
+\end{itemize}
+
+A discovery document at \texttt{GET /.well-known/x402} advertises the prices, the receiver wallet, the asset (USDC on Base mainnet, EIP-712 domain pinned to \texttt{(name="USDC", version="2", chainId=8453)}), and the issuer pubkey, so an external agent can resolve everything it needs to verify a quote without reading source.
+
+\textbf{Settlement flow.} A caller without an \texttt{X-PAYMENT} header receives \texttt{402 Payment Required} plus a JSON challenge: price, receiver wallet, asset, 60-second validity. The caller signs a \texttt{TransferWithAuthorization} typed-data payload to the treasury wallet, base64-encodes the envelope, and retries with \texttt{X-PAYMENT: <envelope>}. The runtime recovers the signer against the USDC v2 EIP-712 domain, verifies the recovered address equals the \texttt{from} field, checks the nonce is not already used via \texttt{authorizationState(authorizer, nonce)}, then calls USDC's \texttt{transferWithAuthorization} directly. Settlement is one transaction; the runtime relays gas in ETH out of the same treasury. On success, \texttt{X-PAYMENT-RESPONSE} returns the on-chain tx hash and block number, and the runtime appends a typed \texttt{treasury.inflow} event:
+
+\begin{lstlisting}
+TreasuryInflow {
+  txHash:      bytes32,
+  chainId:     uint32,        // 8453 (Base mainnet)
+  asset:       address,       // USDC
+  amount:      uint256,       // raw 6-dec value
+  fromAddr:    address,       // payer
+  toAddr:      address,       // treasury wallet
+  blockNumber: uint64,
+  timestamp:   uint64,
+  signature:   bytes65        // Ed25519 from in-enclave key
+}
+\end{lstlisting}
+
+\textbf{Two trust properties this composition adds.} First, the receiver of every X402 inflow is the HKDF-derived treasury wallet whose private key never leaves the enclave; it is reproducible only inside the same image whose digest is pinned in the on-chain attestation anchor. There is no operator-controlled hot wallet sitting between the buyer and the agent. Second, the issuer pubkey on every quote and mark is the same Ed25519 key that signs \texttt{loan.origination} (\S\ref{sec:settlement}). A buyer of a quote can publish the quote and any third party can verify it came from the same verified build that the contract trusts to mint loans. Reasoning, signatures, and economic flows resolve to one root of trust.
+
+\textbf{Why this matters for the autonomy claim.} \S\ref{sec:verify} argues that the team's role shrinks from ongoing fund manager to one-time image publisher. Agent commerce closes the corresponding loop on the income side: every inflow is a signed event auditable on the same canonical log as outflows, so the agent's full economic life --- cognition spend (LLM inference paid through the Eigen AI Gateway authenticated by the KMS-attested JWT), service inflows (X402 metered routes), loan outflows (\texttt{LoanBook.originate}), settlements (\texttt{markRepaid} / \texttt{markLiquidated}), gas refills --- is one append-only stream. A lender doing the audit of \S\ref{sec:verify} reads the same log to verify the agent received what it claims to have received and spent what it claims to have spent.
+
+\textbf{Origination/key separation.} The treasury wallet \texttt{0x667E3116C7eA909f97dD35167c2927BfAf744B7F} and the origination admin \texttt{0x2F86357658C5CF8A5D2221b9935412C880476B14} are distinct HKDF derivations under different info strings (Invariant~1 spec, runtime \texttt{bootstrap.ts}). Distinct keys for distinct concerns: a metering breach on the X402 surface cannot mint loans, and a compromise of the origination key cannot be paid for through the X402 inflow path. Both keys remain enclave-bound; the separation is a defense-in-depth against single-key blast radius, not a substitute for the TEE.
+
+\textbf{What this is not.} The X402 surface is not a primary revenue source for v1; volumes are early. It is the architectural commitment that VANTA's economic in-flows and out-flows are both verifiable, and the substrate for forward roadmap items (\S\ref{sec:roadmap}: pledge-bundling endpoint, on-demand inference, signed dispute analyses) that extend the agent-commerce surface area without changing the lending core.
 
 % =========================================================
 \section{Comparison: Gondor's Curator vs. VANTA's Agent}
@@ -400,26 +439,33 @@ Four surfaces. Three substantive (enclave, on-chain, oracle); one for verificati
   |  HTTP surface: /api/tee  /api/attestation  /api/events/:id            |
   |                /api/origination  /api/loans/:loanId/settle            |
   |                /api/onboarding/candidates  /api/onboarding/decisions  |
+  |                /bridge/wizard/quote  /mark/:market_id  (X402-metered) |
+  |                /.well-known/x402  (discovery: prices + receiver)      |
   +----+----------------------------+--------+----------------------------+
        | signed events              | on-chain txs
        v                            v
   +-- Off-chain log -----------+  +-- On-chain ----------------------+
-  | Walrus + IPFS (full log)   |  | Base Sepolia:                    |
-  | Weekly tip anchor on Base  |  |   LpVault    0xD9AFC3...0f076    |
-  | Content-addressed events   |  |   LoanBook   0xA6004c...a876f    |
-  +----------------------------+  |   AnchorRegistry (weekly tip)    |
+  | Walrus + IPFS (full log)   |  | Base mainnet (chain 8453):       |
+  | Weekly tip anchor on Base  |  |   LpVault    0xe2f93c...ae45b    |
+  | Content-addressed events   |  |   LoanBook   0x7ed4e9...1954     |
+  +----------------------------+  |   USDC       0x833589...2913     |
+                                  |   AnchorRegistry (weekly tip)    |
                                   |   OnboardingRegistry             |
                                   |                                  |
-                                  | Polygon Amoy:                    |
+                                  | Polygon mainnet (chain 137):     |
                                   |   Polymarket CTF (positions)     |
-                                  |   VantaVault 0xD9AFC3...0f076    |
+                                  |   VantaVault 0xe2f93c...ae45b    |
+                                  |                                  |
+                                  | Ethereum mainnet:                |
+                                  |   EigenCompute App ID            |
+                                  |     0x95F2AB29...E80d            |
                                   +----------------------------------+
 
   +-- Polymarket feed ----+      +-- Verifier --------------------------+
   | CLOB depth, TWAP      |      | vanta-verify <url> --rpc <base-rpc>  |
   | UMA dispute history   |      |   reads /api/events; walks to        |
   | Resolution criteria   |      |   genesis; cross-checks paramsHash   |
-  +-----------------------+      |   against LoanBook on Base Sepolia.  |
+  +-----------------------+      |   against LoanBook on Base mainnet.  |
                                  +--------------------------------------+
 \end{verbatim}
 \end{minipage}
@@ -475,7 +521,7 @@ Pump-and-borrow on thin CLOB & $\min(\text{best-bid}, \text{TWAP})$ pricing; dep
 \section{Economics}
 \label{sec:econ}
 
-Borrower APR is 10--25\% for conservative loans, 20--35\% for long-tenor. Gross spread, after realized loss-given-default, is 8--14\%. Curator (where one exists --- Morpho-style external wrapper of VANTA's risk engine) takes 10--20\% of net; VANTA earns 0.5--1.0\% of TVL in oracle and origination fees. At $\sim$\$5M TVL with a 0.75\% blended fee, fee income covers enclave hosting (\$300--800/month for EigenCompute), LLM inference (\$100--400/month at gate-cycle frequency), gas (\$200--600/month at current Base Sepolia/Polygon Amoy levels), and oracle reads with surplus.
+Borrower APR is 10--25\% for conservative loans, 20--35\% for long-tenor. Gross spread, after realized loss-given-default, is 8--14\%. Curator (where one exists --- Morpho-style external wrapper of VANTA's risk engine) takes 10--20\% of net; VANTA earns 0.5--1.0\% of TVL in oracle and origination fees. At $\sim$\$5M TVL with a 0.75\% blended fee, fee income covers enclave hosting (\$300--800/month for EigenCompute), LLM inference (\$100--400/month at gate-cycle frequency), gas (\$200--600/month at current Base/Polygon mainnet levels), and oracle reads with surplus.
 
 The autonomy framing has a direct economic implication: VANTA does not pay a curator. Gondor's three-fund model implies a team curating, rebalancing, and onboarding --- that is salaried work, recovered from the spread. VANTA recovers the same spread; the line item that was salary is now (a) image audit (one-time, contracted), (b) governance multisig (volunteer or compensated, but not full-time), and (c) enclave infrastructure (cloud-vendor cost). The economics scale linearly in TVL with no proportional headcount cost.
 
@@ -489,17 +535,21 @@ The autonomy framing has a direct economic implication: VANTA does not pay a cur
 
 The plan is to land each section of this paper as a shipped artifact, in order of risk-to-lender, before opening the protocol to depositors who are not the team.
 
-\textbf{Now (shipped).} \texttt{LpVault} and \texttt{LoanBook} on Base Sepolia, \texttt{VantaVault} on Polygon Amoy --- all owned by the in-enclave admin address \texttt{0x8275...26e6}. EigenCompute App ID \texttt{0xaa4875Ff...} runs the haircut formula and origination loop. Eleven TypeScript packages (tee, events, treasury, constitution, venue-poly, mark, pledge, haircut, origination, verify, runtime). Demo runs locally on anvil forks in 90 seconds; \texttt{vanta-verify} walks the chain to genesis.
+\textbf{Now (shipped).} \texttt{LpVault} (\texttt{0xe2f93c...ae45b}) and \texttt{LoanBook} (\texttt{0x7ed4e9...1954}) on Base mainnet, \texttt{VantaVault} (\texttt{0xe2f93c...ae45b}) on Polygon mainnet --- all owned by the in-enclave admin address \texttt{0x2F86357658C5CF8A5D2221b9935412C880476B14}. EigenCompute App ID \texttt{0x95F2AB29fAa9A4C834B06B0514428d63C6e0E80d} on \texttt{mainnet-alpha} (anchored on Ethereum mainnet) runs the haircut formula, three reasoning loops (\S\ref{sec:loops}), and the X402 service-agent surface (\S\ref{sec:commerce}, two metered endpoints settling to the HKDF-derived treasury \texttt{0x667E3116C7eA909f97dD35167c2927BfAf744B7F} on Base). Eleven TypeScript packages (tee, events, treasury, constitution, venue-poly, mark, pledge, haircut, origination, verify, runtime); \texttt{vanta-verify} walks the chain to genesis. The live frontend at \texttt{vanta-app.vercel.app} reads the verified attestation block via \texttt{GET /api/tee} and shows it on every page; the X402 discovery doc is live at \texttt{/.well-known/x402}.
 
-\textbf{Month 2 --- onboarding gates and image audit.} Implement the seven-gate cycle of \S\ref{sec:onboard}, with the throughput cap and probation envelope enforced contract-side. Publish the image build with reproducible-build instructions, request audit from one of \{Trail of Bits, OpenZeppelin, Code4rena\}. Auditor signs the image measurement; signature is committed in the contract. The first public depositor checks the auditor's signature, not the image themselves.
+\textbf{Next --- onboarding gates and image audit.} Implement the seven-gate cycle of \S\ref{sec:onboard}, with the throughput cap and probation envelope enforced contract-side. Publish the image build with reproducible-build instructions, request audit from one of \{Trail of Bits, OpenZeppelin, Code4rena\}. Auditor signs the image measurement; signature is committed in the contract. The first public depositor checks the auditor's signature, not the image themselves.
 
-\textbf{Month 3 --- attestation-liveness exit and governance multisig.} Ship Invariant~5 to contract: 14-day silence triggers Withdraw-Only mode; permissionless withdrawal at TWAP-marked NAV. Deploy 4-of-7 lender-quorum multisig for emergency pause and parameter calibration commits. Calibration v0 published with public 12-month replay dataset and reproducible calibration code.
+\textbf{Then --- attestation-liveness exit and governance multisig.} Ship Invariant~5 to contract: 14-day silence triggers Withdraw-Only mode; permissionless withdrawal at TWAP-marked NAV. Deploy 4-of-7 lender-quorum multisig for emergency pause and parameter calibration commits. Calibration v0 published with public 12-month replay dataset and reproducible calibration code.
 
-\textbf{Month 4 --- mainnet, with caps.} Move to Base mainnet with a hard \$1M TVL ceiling. First 30 days: lender-quorum may pause onboarding without notice; \$25k probation envelope kept; bond-and-flag system live. If no T1--T9 events trigger, ramp ceiling.
+\textbf{Then --- TVL ramp.} v1 mainnet currently runs against a soft cap with no public deposits invited; the bond-and-flag system, the probation envelope, and the lender-quorum multisig must all be live before the first public-depositor cohort. Ramp follows the absence of T1--T9 events, not a calendar.
 
-\textbf{Month 5 --- multi-position borrower UX.} Ship the batched-origination event schema; deploy a position-portfolio view served from the same signed event log the verifier reads; extend the credit loop (\S\ref{sec:loops}) with an exit planner that schedules correlated settlements in a single transaction. A holder of ten Polymarket positions originates ten loans in one user action and settles correlated positions in batches as their cluster events resolve. VantaVault tracks position-level escrow already, so this is a user-facing surface plus an agent-side scheduler over state the credit loop already maintains, not a new contract subsystem.
+\textbf{Then --- per-agent on-chain isolation.} Source for \texttt{AgentRegistry}, \texttt{AgentFactory}, per-VANTA \texttt{AgentPoolVault}, \texttt{PositionBook}, and \texttt{OperationalCap} already lives in \texttt{contracts/src/}. Deploy \texttt{AgentRegistry} on Base mainnet, then \texttt{AgentFactory.deploy()} once per persona to atomically create that persona's per-agent vault + position book + operational cap and register on chain. Runtime stub in \texttt{runtime/src/services/agent-registry-reader.ts} already includes a \texttt{createViemRegistryReader}; the \texttt{infra\_mode} field on \texttt{/api/agents} flips from \texttt{shared-pool-v1} to \texttt{per-agent-v2} once the registry exists. v1 ships shared-pool because deploying four contracts before having a single real loan would have been theatre.
 
-\textbf{Month 6+.} Tranches. Cross-margining (Gondor V1's diversified-collateral model, but with formula-derived correlation haircuts). Whitelisted Hyperliquid HIP-4 markets~\cite{hyperliquid-hip4} when their resolution criteria stabilize. Kalshi event-contract integration is gated on a separate FCM-compliance review and is not in current scope.
+\textbf{Then --- multi-position borrower UX.} Ship the batched-origination event schema; deploy a position-portfolio view served from the same signed event log the verifier reads; extend the credit loop (\S\ref{sec:loops}) with an exit planner that schedules correlated settlements in a single transaction. A holder of ten Polymarket positions originates ten loans in one user action and settles correlated positions in batches as their cluster events resolve. VantaVault tracks position-level escrow already, so this is a user-facing surface plus an agent-side scheduler over state the credit loop already maintains, not a new contract subsystem.
+
+\textbf{Then --- additional X402 service surfaces.} Pledge-bundling endpoint, on-demand model-of-the-day inference, signed dispute analyses; each one extends VANTA's agent-commerce surface area (\S\ref{sec:commerce}) without changing the lending core.
+
+\textbf{Later.} Per-agent TEE signing keys (three separate EigenCompute apps, one per persona, for cryptographic isolation between vanta-opus / vanta-gpt / vanta-gemini). Tranches. Cross-margining (Gondor V1's diversified-collateral model, but with formula-derived correlation haircuts). Whitelisted Hyperliquid HIP-4 markets~\cite{hyperliquid-hip4} when their resolution criteria stabilize. Kalshi event-contract integration is gated on a separate FCM-compliance review and is not in current scope.
 
 The ordering is not arbitrary. Each step closes a specific lender-grade question: \emph{what custody risk am I taking?} (image audit), \emph{what happens if Eigen disappears?} (attestation-liveness exit), \emph{who can pause this and why?} (lender-quorum multisig), \emph{what's my downside on a bad onboarding?} (probation envelope). A serious lender depositing in Month 4 has answers to all four.
 
@@ -572,6 +622,10 @@ We invite critique --- on the formula, on the gates, on the threat model, on the
 \bibitem{eigenagentkit} EigenLayer. \emph{EigenCloud AgentKit.} 2025--2026.
 
 \bibitem{coinbaseagentkit} Coinbase. \emph{AgentKit: wallet and action layer for autonomous agents.} 2025.
+
+\bibitem{coinbase-x402} Coinbase. \emph{x402: an open standard for HTTP-native payments.} 2025. \url{https://github.com/coinbase/x402}.
+
+\bibitem{eip3009} P. Choi and E. Bertanian. \emph{ERC-3009: Transfer with Authorization.} Ethereum Improvement Proposals, 2019. \url{https://eips.ethereum.org/EIPS/eip-3009}.
 
 \bibitem{bobisalive} W.~Okechukwu. \emph{bobIsAlive: a sovereign agent on EigenCompute.} Synthesis Hackathon 2026 winner.
 
