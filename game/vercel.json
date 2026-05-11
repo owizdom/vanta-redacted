@@ -13,7 +13,7 @@
       "destination": "http://35.232.60.83:8787/admin/:path*"
     },
     {
-      "source": "/((?!api/runtime|admin|assets|.*\\..*).*)",
+      "source": "/((?!api/runtime|api/voice|admin|assets|.*\\..*).*)",
       "destination": "/index.html"
     }
   ]

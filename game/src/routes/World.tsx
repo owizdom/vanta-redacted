@@ -3,10 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { AgentDetailCard } from "../components/AgentDetailCard";
+import { AudioToggle } from "../components/AudioToggle";
 import { ChatPanel } from "../components/ChatPanel";
 import { MadeSovereignWith } from "../components/MadeSovereignWith";
+import { playSfx, sfxForEventType } from "../lib/audio";
 import { fetchAgents, type V3AgentSummary } from "../lib/runtime";
 import { sseStream, type ReasoningEvent } from "../lib/stream";
+import { narrateEvent } from "../lib/narrator";
+import { speakCouncil, speakNarrator } from "../lib/voice";
 import { VantaWorld } from "../scenes/VantaWorld";
 
 const ACTIVITY_WINDOW_MS = 30_000;
@@ -68,6 +72,11 @@ export function World(): JSX.Element {
   // Subscribe to the runtime's signed-event SSE stream. Real only —
   // the panel sits in its empty waiting state until the runtime
   // emits its first event.
+  //
+  // Per-event we also dispatch a short SFX (audio engine no-ops if
+  // the user hasn't unmuted) and, on `council.synthesised`, queue
+  // a TTS line for the agent's voice persona via the proxied
+  // ElevenLabs endpoint (no-ops if no key is configured).
   useEffect(() => {
     const stream = sseStream();
     const off = stream.subscribe((e) => {
@@ -76,6 +85,20 @@ export function World(): JSX.Element {
         if (next.length > MAX_ENTRIES) next.splice(0, next.length - MAX_ENTRIES);
         return next;
       });
+      // Audio reaction. Every event triggers an SFX (no-op when
+      // muted). `council.synthesised` fires a kingdom-voice line.
+      // Other events go through the narrator (Antoni), throttled
+      // to a 25-40s gap so it threads commentary without dominating.
+      const sfx = sfxForEventType(e.type);
+      if (sfx !== null) playSfx(sfx);
+      if (e.type === "council.synthesised") {
+        const body = (e as unknown as { body?: { rationale?: string } }).body;
+        const rationale = body?.rationale ?? "The council has reached a decision.";
+        void speakCouncil(e.agentId, rationale);
+      } else {
+        const line = narrateEvent(e);
+        if (line !== null) void speakNarrator(line);
+      }
     });
     return off;
   }, []);
@@ -130,6 +153,7 @@ export function World(): JSX.Element {
 
       {/* top-right wallet */}
       <div className="pointer-events-none absolute right-4 top-4 z-10 flex items-center gap-3">
+        <AudioToggle />
         <span className="pointer-events-auto rounded-[2px] border border-ink-700 bg-ink-900/85 px-3 py-1.5">
           <MadeSovereignWith size="sm" />
         </span>
