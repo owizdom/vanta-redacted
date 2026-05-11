@@ -5,6 +5,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { AgentDetailCard } from "../components/AgentDetailCard";
 import { AudioToggle } from "../components/AudioToggle";
 import { ChatPanel } from "../components/ChatPanel";
+import { HowItWorksModal } from "../components/HowItWorksModal";
 import { MadeSovereignWith } from "../components/MadeSovereignWith";
 import { playSfx, sfxForEventType } from "../lib/audio";
 import { fetchAgents, type V3AgentSummary } from "../lib/runtime";
@@ -39,6 +40,7 @@ export function World(): JSX.Element {
   const [err, setErr] = useState<string | null>(null);
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(initialAgentId);
   const [events, setEvents] = useState<readonly ReasoningEvent[]>([]);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
 
   // Sync the URL param when the user opens / closes a card so deep links work.
   useEffect(() => {
@@ -153,6 +155,15 @@ export function World(): JSX.Element {
 
       {/* top-right wallet */}
       <div className="pointer-events-none absolute right-4 top-4 z-10 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setShowHowItWorks(true)}
+          className="pointer-events-auto grid h-7 w-7 place-items-center rounded-[2px] border border-ink-700 bg-ink-900/85 font-mono text-[11px] font-semibold text-chalk-300 hover:text-chalk-50"
+          aria-label="how it works"
+          title="how it works"
+        >
+          ?
+        </button>
         <AudioToggle />
         <span className="pointer-events-auto rounded-[2px] border border-ink-700 bg-ink-900/85 px-3 py-1.5">
           <MadeSovereignWith size="sm" />
@@ -164,6 +175,11 @@ export function World(): JSX.Element {
 
       {/* live reasoning chat panel */}
       <ChatPanel events={events} />
+
+      <HowItWorksModal
+        open={showHowItWorks}
+        onClose={() => setShowHowItWorks(false)}
+      />
 
       {/* footer hint */}
       <footer className="pointer-events-none absolute bottom-4 left-4 z-10 rounded-[2px] border border-ink-700 bg-ink-900/85 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.22em] text-chalk-400">
