@@ -87,12 +87,12 @@ export function createGatewayJudge(args: {
       system:
         "You score market resolution-criteria text for clarity. Respond with a single integer in 0..100 and nothing else.",
       messages: [{ role: "user", content: filled }],
-      // 32 tokens (was 8) so reasoning-mode providers like Gemini 2.5
-      // Pro that spend internal tokens on hidden chain-of-thought still
-      // have headroom for the visible integer. The strict-parse regex
-      // below caps interpretation, so a longer response can't smuggle
-      // a wrong score. Knob change only — prompt bytes unchanged.
-      maxTokens: 32,
+      // 1024 tokens (was 32) so GPT-5 reasoning mode has enough budget
+      // to finish its hidden chain-of-thought and still emit a visible
+      // integer. Strict-parse regex below caps interpretation, so a
+      // longer response can't smuggle a wrong score. Knob change only —
+      // prompt bytes unchanged.
+      maxTokens: 1024,
       temperature: 0,
     });
     const score = parseScoreOrThrow(out.text);

@@ -1,14 +1,16 @@
 /**
- * Vercel serverless function — ElevenLabs TTS proxy.
+ * Vercel Edge function — ElevenLabs TTS proxy.
  *
  * Mirror of the dev-server middleware in game/vite.config.ts so the
  * client (`lib/voice.ts`) hits the same `POST /api/voice` shape in
  * dev and prod. The API key lives in Vercel env (`ELEVENLABS_API_KEY`)
- * and never reaches the client bundle.
+ * and never reaches the client bundle. Edge runtime is used because
+ * the handler is a Web-API Request→Response and binary streaming of
+ * the upstream MP3 works natively without buffer juggling.
  */
 
 export const config = {
-  runtime: "nodejs",
+  runtime: "edge",
 };
 
 interface RequestBody {
