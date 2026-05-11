@@ -356,6 +356,20 @@ export function createPledgeWatcher(
     }
 
     const loanId = asSha256Hex(randomBytes(32).toString("hex"));
+    // The events schema's `hex64` is strict: `^[0-9a-f]{64}$` — no 0x
+    // prefix, lowercase only. viem returns mixed-case 0x-prefixed
+    // hashes on log fields, so we normalise here. Without this, every
+    // loan.pledge emit fails the permissive envelope parse and we
+    // silently lose the pledge — the original month-long blocker.
+    const cleanHex64 = (h: string | null | undefined): string => {
+      if (typeof h !== "string" || h.length === 0) return "0".repeat(64);
+      const stripped = h.startsWith("0x") ? h.slice(2) : h;
+      const lower = stripped.toLowerCase();
+      if (lower.length > 64) return lower.slice(-64);
+      return lower.padStart(64, "0");
+    };
+    const txHashClean = cleanHex64(txHash);
+    const blockHashClean = cleanHex64(log.blockHash);
     try {
       const eventId = await opts.events.emit({
         type: "loan.pledge",
@@ -365,9 +379,9 @@ export function createPledgeWatcher(
           position_id: tokenIdStr,
           amount: value.toString(),
           vault_address: opts.vantaVaultAddress,
-          tx_hash: txHash,
+          tx_hash: txHashClean,
           block_number: Number(log.blockNumber ?? 0n),
-          block_hash: log.blockHash ?? "0x0",
+          block_hash: blockHashClean,
           log_index: logIndex,
           confirmation_depth: CONFIRMATIONS,
           condition_id: asSha256Hex(conditionId),

@@ -281,13 +281,17 @@ async function startMain(): Promise<void> {
   // This was the root cause of the months-long "pledge_watcher never
   // emits" symptom — `polygon-bor-rpc.publicnode.com` returns 200/empty
   // on poll, so `watchContractEvent` thinks nothing happened.
+  // Polygon mainnet RPC fallback list. `polygon-rpc.com` returns 401
+  // ("tenant disabled") for our app's IP — removed. `publicnode.com`
+  // works for getLogs but its filter-based subscription expires every
+  // ~30s, causing the live watcher to reconnect-storm; we tolerate it
+  // because the backfill loop is the load-bearing emission path.
   const POLYGON_FALLBACK_RPCS: readonly string[] = (() => {
     const seen = new Set<string>();
     const out: string[] = [];
     for (const u of [
       config.amoyRpcUrl,
       "https://polygon.llamarpc.com",
-      "https://polygon-rpc.com",
       "https://polygon-bor-rpc.publicnode.com",
     ]) {
       if (u !== undefined && u.length > 0 && !seen.has(u)) {
