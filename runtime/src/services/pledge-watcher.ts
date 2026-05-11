@@ -42,6 +42,17 @@ const CTF_ABI = [
 const RECONNECT_BACKOFF_MS = 5_000;
 const CONFIRMATIONS = 6;
 
+/** How often we sweep recent blocks looking for transfers the live
+ *  subscription might have dropped (viem's `watchContractEvent` is
+ *  not crash-proof — it pauses silently on certain RPC errors). */
+const BACKFILL_INTERVAL_MS = 20_000;
+
+/** How many blocks to scan on each backfill sweep. ~500 blocks ≈
+ *  17 minutes on Polygon, well past `CONFIRMATIONS + 60s` of frontend
+ *  patience, so even one sweep catches anything the live watcher
+ *  missed since the last sweep. */
+const BACKFILL_LOOKBACK_BLOCKS = 500n;
+
 export interface PledgeWatcher {
   readonly start: () => void;
   readonly stop: () => Promise<void>;
@@ -226,16 +237,65 @@ export function createPledgeWatcher(
     }
   };
 
+  // Backfill sweep — supplements the live subscription. viem's
+  // `watchContractEvent` has a failure mode where it silently stops
+  // polling after certain transient RPC errors (observed in
+  // production with public-node Polygon RPCs that rate-limit
+  // eth_getLogs). The sweep below queries the recent block window
+  // every 20s and replays any TransferSingle the live watcher
+  // missed. Dedup is the same `seen` set used by the live handler,
+  // so a transfer the live path already emitted is a no-op here.
+  let backfillTimer: NodeJS.Timeout | null = null;
+  const runBackfill = async (): Promise<void> => {
+    if (stopped) return;
+    try {
+      const current = await opts.polygonClient.getBlockNumber();
+      const fromBlock =
+        current > BACKFILL_LOOKBACK_BLOCKS
+          ? current - BACKFILL_LOOKBACK_BLOCKS
+          : 0n;
+      const logs = await opts.polygonClient.getLogs({
+        address: opts.ctfAddress,
+        event: CTF_ABI[0],
+        args: { to: opts.vantaVaultAddress },
+        fromBlock,
+        toBlock: current,
+      });
+      for (const log of logs) {
+        // handleLog dedups via `seen`, so this is idempotent vs the
+        // live subscription firing concurrently.
+        void handleLog(log as Log);
+      }
+    } catch (err) {
+      opts.log?.warn({
+        msg: "pledge_watcher_backfill_failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      if (!stopped) {
+        backfillTimer = setTimeout(() => void runBackfill(), BACKFILL_INTERVAL_MS);
+      }
+    }
+  };
+
   return {
     start() {
       if (unwatch !== null || stopped) return;
       subscribe();
+      // Kick the backfill loop. First run is also a hot-start scan —
+      // catches anything that happened between container restart and
+      // subscription becoming live.
+      backfillTimer = setTimeout(() => void runBackfill(), 2_000);
     },
     async stop() {
       stopped = true;
       if (reconnectTimer !== null) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
+      }
+      if (backfillTimer !== null) {
+        clearTimeout(backfillTimer);
+        backfillTimer = null;
       }
       if (unwatch !== null) {
         unwatch();
