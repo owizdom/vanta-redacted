@@ -371,6 +371,30 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
     );
   }, [feed, submitTime, kingdom.agentId]);
 
+  // Auto-clamp the loan amount to the max derived from the currently
+  // selected position. Without this the input defaults to $500, which
+  // is fine for a $10k bet but blocks the submit button when a user
+  // has a tiny position (e.g. 34 shares × $0.03 = $1 collateral, max
+  // loan $0.66). We snap on position-change or first paint; users
+  // can still type a smaller number, but they can't blow past the cap.
+  useEffect(() => {
+    if (!open) return;
+    const sel = portfolio[selectedIdx] ?? portfolio[0];
+    if (sel === undefined) return;
+    const maxNow = (sel.shares * sel.market.currentMid * 6_500) / 10_000;
+    if (maxNow <= 0) return;
+    const cur = Number.parseFloat(principalUsdc) || 0;
+    // Only adjust when the current value would block submission — i.e.
+    // it's zero, or exceeds the cap. Leaving a user's hand-typed smaller
+    // amount untouched.
+    if (cur <= 0 || cur > maxNow) {
+      // 2 decimals so cents read cleanly on tiny positions.
+      const next = Math.max(0.01, Math.floor(maxNow * 100) / 100);
+      setPrincipalUsdc(next.toFixed(2));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, selectedIdx, portfolio]);
+
   if (!open) return null;
 
   const selected = portfolio[selectedIdx] ?? portfolio[0];
@@ -380,6 +404,7 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
   const apr = 4.7;
   const principalNum = Number.parseFloat(principalUsdc) || 0;
   const principalOk = principalNum > 0 && principalNum <= maxLoanUsdc;
+  const principalTooBig = principalNum > maxLoanUsdc;
 
   const onSubmit = async (): Promise<void> => {
     if (!isConnected || !address) {
@@ -759,7 +784,7 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
             <div className="mb-2 flex items-baseline justify-between font-mono text-[10px]">
               <span className="text-chalk-400">max loan</span>
               <span className="text-chalk-200">
-                ${maxLoanUsdc.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                ${maxLoanUsdc.toFixed(2)}
                 <span className="ml-1 text-chalk-500">
                   ({(HAIRCUT_BPS / 100).toFixed(0)}%)
                 </span>
@@ -778,6 +803,19 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
                 onChange={setMaturityDays}
               />
             </div>
+            {principalTooBig ? (
+              <button
+                type="button"
+                onClick={() =>
+                  setPrincipalUsdc(
+                    Math.max(0.01, Math.floor(maxLoanUsdc * 100) / 100).toFixed(2),
+                  )
+                }
+                className="mt-2 w-full rounded-[2px] border border-signal-red/50 bg-signal-red/10 px-2 py-1.5 text-left font-mono text-[10px] text-signal-red hover:bg-signal-red/15"
+              >
+                ${principalNum.toFixed(2)} exceeds max — click to clamp to ${maxLoanUsdc.toFixed(2)}
+              </button>
+            ) : null}
             <div className="mt-2 flex items-center justify-between font-mono text-[9.5px] text-chalk-400">
               <span>≈ {apr.toFixed(1)}% APR</span>
               <span>

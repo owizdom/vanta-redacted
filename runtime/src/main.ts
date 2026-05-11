@@ -28,6 +28,7 @@ import {
 import {
   createPublicClient,
   defineChain,
+  fallback,
   http,
   type PublicClient,
 } from "viem";
@@ -272,9 +273,35 @@ async function startMain(): Promise<void> {
     },
     rpcUrls: { default: { http: [config.amoyRpcUrl] } },
   });
+  // viem `fallback` transport across three public Polygon RPCs so a
+  // single rate-limited / silently-dropping node doesn't black out
+  // the pledge watcher. Order: configured primary, then two known-good
+  // public mirrors. All three are on the ecloud egress allowlist.
+  // This was the root cause of the months-long "pledge_watcher never
+  // emits" symptom — `polygon-bor-rpc.publicnode.com` returns 200/empty
+  // on poll, so `watchContractEvent` thinks nothing happened.
+  const POLYGON_FALLBACK_RPCS: readonly string[] = (() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const u of [
+      config.amoyRpcUrl,
+      "https://polygon.llamarpc.com",
+      "https://polygon-rpc.com",
+      "https://polygon-bor-rpc.publicnode.com",
+    ]) {
+      if (u !== undefined && u.length > 0 && !seen.has(u)) {
+        seen.add(u);
+        out.push(u);
+      }
+    }
+    return out;
+  })();
   const amoyClient = createPublicClient({
     chain: polygonChain,
-    transport: http(config.amoyRpcUrl),
+    transport:
+      config.amoyChainId === 137 && POLYGON_FALLBACK_RPCS.length > 1
+        ? fallback(POLYGON_FALLBACK_RPCS.map((url) => http(url)))
+        : http(config.amoyRpcUrl),
   });
 
   const app = createApp({ config, bootstrap: boot });

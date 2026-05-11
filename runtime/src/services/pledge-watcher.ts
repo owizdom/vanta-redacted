@@ -47,11 +47,20 @@ const CONFIRMATIONS = 6;
  *  not crash-proof — it pauses silently on certain RPC errors). */
 const BACKFILL_INTERVAL_MS = 20_000;
 
-/** How many blocks to scan on each backfill sweep. ~500 blocks ≈
- *  17 minutes on Polygon, well past `CONFIRMATIONS + 60s` of frontend
- *  patience, so even one sweep catches anything the live watcher
- *  missed since the last sweep. */
-const BACKFILL_LOOKBACK_BLOCKS = 500n;
+/** How many blocks to scan on each backfill sweep.
+ *
+ *  Polygon block time is ~2s, so 9_500 blocks ≈ 5 hours of history.
+ *  We use 9_500 (not 10_000) because most public RPCs cap eth_getLogs
+ *  at a 10_000-block range and reject anything strictly larger. This
+ *  gives the sweep a wide-enough recovery window to bridge a full
+ *  container upgrade cycle (~minutes) plus any silent RPC pauses,
+ *  without ever touching the per-call range limit.
+ *
+ *  Idempotency on the live `seen` set means repeated sweeps of the
+ *  same window are no-ops — the dedup key (txHash, logIndex) is
+ *  already cached from a prior emit.
+ */
+const BACKFILL_LOOKBACK_BLOCKS = 9_500n;
 
 export interface PledgeWatcher {
   readonly start: () => void;
