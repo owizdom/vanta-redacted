@@ -2,10 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   useAccount,
   useReadContracts,
-  useWaitForTransactionReceipt,
-  useWriteContract,
+  useSignTypedData,
 } from "wagmi";
-import { parseAbi } from "viem";
+import { type Address } from "viem";
 
 import type { Kingdom } from "../lib/kingdoms";
 import {
@@ -18,17 +17,24 @@ import {
   useRealMarkets,
   type DemoMarket,
 } from "../lib/markets";
+import {
+  deriveUserWallet,
+  pollRelayerTx,
+  submitWalletCtfTransfer,
+  type RelayerAuth,
+} from "../lib/polymarket-relayer";
+import { deriveApiKey, type ApiCreds } from "../lib/polymarket-auth";
 import { sseStream, type ReasoningEvent } from "../lib/stream";
 import { DEMO_ADDRESS } from "../lib/wallets/demo-wallet";
+
+const PM_PROXY_KEY = "vanta:polymarket:proxy";
+const PM_API_KEY = "vanta:polymarket:apiKey";
+const PM_CREDS_KEY = "vanta:polymarket:creds";
 
 // VantaVault address — same on Polygon as LpVault on Base for the V0
 // deploy (same TEE-derived deployer + same nonce). Hardcoded for the
 // frontend to skip a runtime round-trip.
 const VANTA_VAULT_ADDRESS = "0xe2f93c448d9fc51155e2e06479b3b1e86f8ae45b" as const;
-
-const CTF_TRANSFER_ABI = parseAbi([
-  "function safeTransferFrom(address from, address to, uint256 id, uint256 value, bytes data)",
-]);
 
 interface Props {
   readonly kingdom: Kingdom;
@@ -107,6 +113,124 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
     address !== undefined &&
     address.toLowerCase() === DEMO_ADDRESS.toLowerCase();
 
+  // Polymarket relayer settings — the user's CTF tokens live in a
+  // Safe-style proxy controlled by Polymarket's relayer (not the
+  // user's EOA), so a real borrow needs (a) the proxy address that
+  // actually holds the CTF and (b) a Polymarket Relayer API key the
+  // user can paste from their Polymarket developer settings. Auto-
+  // derived from the EOA via Polymarket's PolyProxyFactory CREATE2
+  // pattern; user can override if their proxy was deployed by an
+  // older factory or via email-auth.
+  const [pmProxy, setPmProxy] = useState<string>(() => {
+    try {
+      return window.localStorage.getItem(PM_PROXY_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const [pmApiKey, setPmApiKey] = useState<string>(() => {
+    try {
+      return window.localStorage.getItem(PM_API_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  useEffect(() => {
+    if (address === undefined || isDemoWallet) return;
+    if (pmProxy.length > 0) return;
+    try {
+      const derived = deriveUserWallet(address);
+      setPmProxy(derived);
+      window.localStorage.setItem(PM_PROXY_KEY, derived);
+    } catch {
+      /* derivation should never fail on a 20-byte addr; ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, isDemoWallet]);
+  const persistProxy = (v: string): void => {
+    setPmProxy(v);
+    try {
+      window.localStorage.setItem(PM_PROXY_KEY, v);
+    } catch {
+      /* private mode — keep in-memory only */
+    }
+  };
+  const persistApiKey = (v: string): void => {
+    setPmApiKey(v);
+    try {
+      window.localStorage.setItem(PM_API_KEY, v);
+    } catch {
+      /* private mode — keep in-memory only */
+    }
+  };
+  const [pmCreds, setPmCreds] = useState<ApiCreds | null>(() => {
+    try {
+      const raw = window.localStorage.getItem(PM_CREDS_KEY);
+      if (raw === null) return null;
+      const parsed = JSON.parse(raw) as Partial<ApiCreds>;
+      if (
+        typeof parsed.key === "string" &&
+        typeof parsed.secret === "string" &&
+        typeof parsed.passphrase === "string"
+      ) {
+        return { key: parsed.key, secret: parsed.secret, passphrase: parsed.passphrase };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+  const [credsBusy, setCredsBusy] = useState(false);
+  const [credsErr, setCredsErr] = useState<string | null>(null);
+
+  const proxyValid = /^0x[0-9a-fA-F]{40}$/.test(pmProxy);
+  const apiKeyValid = pmApiKey.trim().length > 0;
+  const credsValid =
+    pmCreds !== null &&
+    pmCreds.key.length > 0 &&
+    pmCreds.secret.length > 0 &&
+    pmCreds.passphrase.length > 0;
+  const authReady = credsValid || apiKeyValid;
+  const proxyAddr = (proxyValid ? pmProxy : null) as Address | null;
+  const { signTypedDataAsync } = useSignTypedData();
+
+  const persistCreds = (c: ApiCreds | null): void => {
+    setPmCreds(c);
+    try {
+      if (c === null) window.localStorage.removeItem(PM_CREDS_KEY);
+      else window.localStorage.setItem(PM_CREDS_KEY, JSON.stringify(c));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const connectPolymarket = async (): Promise<void> => {
+    if (address === undefined) {
+      setCredsErr("connect wallet first");
+      return;
+    }
+    setCredsBusy(true);
+    setCredsErr(null);
+    try {
+      const creds = await deriveApiKey({
+        eoa: address,
+        chainId: POLYMARKET_CTF_CHAIN_ID,
+        signTypedData: (typedArgs) =>
+          signTypedDataAsync({
+            domain: typedArgs.domain,
+            types: typedArgs.types,
+            primaryType: typedArgs.primaryType,
+            message: typedArgs.message,
+          }),
+      });
+      persistCreds(creds);
+    } catch (e) {
+      setCredsErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCredsBusy(false);
+    }
+  };
+
   // Live markets the runtime is actually watching right now.
   const { markets: liveMarkets, loading: marketsLoading, error: marketsError } =
     useRealMarkets();
@@ -117,21 +241,27 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
   );
 
   // Real Polymarket CTF balance reads on Polygon mainnet. We multicall
-  // `balanceOf(user, tokenId)` for each themed market's tokenId so the
-  // borrow modal surfaces the wallet's ACTUAL CTF holdings instead of
-  // fabricated share counts.
+  // `balanceOf(holder, tokenId)` for each themed market's tokenId so
+  // the borrow modal surfaces the wallet's ACTUAL CTF holdings.
+  //
+  // Holder = the Polymarket proxy that actually owns the CTF tokens
+  // (NOT the user's connected EOA), since Polymarket routes all
+  // trades through a Safe-style proxy. Falls back to the EOA when no
+  // proxy is configured so users with raw CTF in their wallet (rare,
+  // e.g. CLOB API users) still see balances.
+  const holderForBalance = proxyAddr ?? address;
   const balanceContracts = useMemo(
     () =>
-      address !== undefined
+      holderForBalance !== undefined && holderForBalance !== null
         ? themedMarkets.map((m) => ({
             address: POLYMARKET_CTF_ADDRESS,
             abi: ERC1155_BALANCE_OF_ABI,
             functionName: "balanceOf" as const,
-            args: [address, BigInt(m.tokenId)] as const,
+            args: [holderForBalance, BigInt(m.tokenId)] as const,
             chainId: POLYMARKET_CTF_CHAIN_ID,
           }))
         : [],
-    [address, themedMarkets],
+    [holderForBalance, themedMarkets],
   );
 
   const balancesQuery = useReadContracts({
@@ -182,7 +312,6 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
 
   const hasRealPositions = portfolio.some((p) => p.real);
 
-  const { writeContractAsync } = useWriteContract();
 
   const [selectedIdx, setSelectedIdx] = useState<number>(0);
   const [principalUsdc, setPrincipalUsdc] = useState("500");
@@ -284,16 +413,37 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
     //       signed loan.pledge event, and call /api/origination with
     //       the pledgeEventId to land a real LoanBook entry on Base.
     if (!isDemoWallet && selected.real) {
+      if (!proxyValid || proxyAddr === null) {
+        setStage({
+          kind: "error",
+          message:
+            "polymarket deposit wallet address required (auto-derived from your eoa; paste your funder address from polymarket.com if it differs)",
+        });
+        return;
+      }
+      if (!authReady) {
+        setStage({
+          kind: "error",
+          message:
+            "polymarket auth required — click 'connect polymarket' (1 signature) or paste a relayer api key",
+        });
+        return;
+      }
+      const auth: RelayerAuth = credsValid && pmCreds !== null
+        ? { mode: "builder", creds: pmCreds, eoa: address }
+        : { mode: "relayer-key", apiKey: pmApiKey.trim(), eoa: address };
       try {
         await runRealBorrow({
-          borrower: address,
+          borrower: proxyAddr,
+          eoa: address,
+          auth,
+          signTypedDataAsync,
           tokenId: selected.market.tokenId,
           conditionIdHex: selected.market.conditionIdHex,
           principalUsdc6,
           maturityTsUnix,
           shares: selected.shares,
           setStage,
-          writeContractAsync,
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -414,6 +564,73 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
             </div>
           )}
 
+          {isConnected && !isDemoWallet ? (
+            <div className="mb-3 rounded-[2px] border border-ink-700 bg-ink-800/40 p-2">
+              <div className="mb-1.5 font-mono text-[9px] uppercase tracking-[0.18em] text-chalk-500">
+                polymarket account
+              </div>
+              <label className="block">
+                <div className="mb-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-chalk-500">
+                  deposit wallet (funder)
+                </div>
+                <input
+                  type="text"
+                  value={pmProxy}
+                  onChange={(e) => persistProxy(e.target.value.trim())}
+                  spellCheck={false}
+                  placeholder="0x… (auto-derived from your eoa)"
+                  className="w-full rounded-[2px] border border-ink-700 bg-ink-900 px-1.5 py-1 font-mono text-[10px] text-chalk-200 outline-none focus:border-chalk-500"
+                />
+              </label>
+              <div className="mt-2">
+                {credsValid ? (
+                  <div className="flex items-center justify-between gap-2 rounded-[2px] border border-signal-green/40 bg-signal-green/5 px-2 py-1 font-mono text-[10px] text-signal-green">
+                    <span>● polymarket connected (key {pmCreds?.key.slice(0, 8)}…)</span>
+                    <button
+                      type="button"
+                      onClick={() => persistCreds(null)}
+                      className="text-[9px] uppercase tracking-[0.18em] text-chalk-500 hover:text-chalk-200"
+                    >
+                      disconnect
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void connectPolymarket()}
+                    disabled={credsBusy || !isConnected}
+                    className="w-full rounded-[2px] border border-chalk-500 bg-ink-900 px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-chalk-200 hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {credsBusy ? "signing…" : "connect polymarket (1 sig)"}
+                  </button>
+                )}
+                {credsErr !== null ? (
+                  <div className="mt-1 font-mono text-[9px] text-signal-red">
+                    {credsErr}
+                  </div>
+                ) : null}
+              </div>
+              <details className="mt-2 font-mono text-[9px] text-chalk-500">
+                <summary className="cursor-pointer hover:text-chalk-300">
+                  or paste relayer api key manually
+                </summary>
+                <label className="mt-1 block">
+                  <input
+                    type="password"
+                    value={pmApiKey}
+                    onChange={(e) => persistApiKey(e.target.value.trim())}
+                    spellCheck={false}
+                    placeholder="paste from polymarket.com developer settings"
+                    className="w-full rounded-[2px] border border-ink-700 bg-ink-900 px-1.5 py-1 font-mono text-[10px] text-chalk-200 outline-none focus:border-chalk-500"
+                  />
+                </label>
+              </details>
+              <div className="mt-1 font-mono text-[9px] text-chalk-500">
+                credentials stored locally; never sent to vanta backend.
+              </div>
+            </div>
+          ) : null}
+
           <Step title="pick a position">
             <p className="mb-2 text-[10px] leading-relaxed text-chalk-400">
               borrow USDC against a polymarket bet — keep the upside, get cash now (haircut {(HAIRCUT_BPS / 100).toFixed(0)}%).
@@ -430,7 +647,7 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
               <div className="mb-2 rounded-[2px] border border-signal-amber/40 bg-signal-amber/5 px-2 py-1 font-mono text-[10px] text-signal-amber">
                 no polymarket positions on{" "}
                 <span className="text-chalk-100">
-                  {address?.slice(0, 6)}…{address?.slice(-4)}
+                  {(holderForBalance ?? "").slice(0, 6)}…{(holderForBalance ?? "").slice(-4)}
                 </span>{" "}
                 — to use the real flow, buy YES/NO shares on{" "}
                 <a
@@ -843,31 +1060,50 @@ function NumberInput({ label, value, onChange, prefix }: NumberInputProps): JSX.
 }
 
 interface RealBorrowArgs {
-  readonly borrower: `0x${string}`;
+  /** Borrower as registered on VantaVault — the Polymarket
+   *  DepositWallet that actually owns the CTF tokens, not the user's
+   *  connected EOA. */
+  readonly borrower: Address;
+  /** User's connected EOA — owns the DepositWallet, signs the
+   *  EIP-712 Batch the relayer submits. */
+  readonly eoa: Address;
+  /** Relayer auth — either L1-derived CLOB credentials (preferred,
+   *  signed once via "connect polymarket") or a long-lived
+   *  RELAYER_API_KEY pasted from Polymarket developer settings. */
+  readonly auth: RelayerAuth;
+  readonly signTypedDataAsync: ReturnType<
+    typeof useSignTypedData
+  >["signTypedDataAsync"];
   readonly tokenId: string;
   readonly conditionIdHex: string;
   readonly principalUsdc6: bigint;
   readonly maturityTsUnix: number;
   readonly shares: number;
   readonly setStage: (s: FormStage) => void;
-  readonly writeContractAsync: ReturnType<typeof useWriteContract>["writeContractAsync"];
 }
 
 /**
  * The real borrow path. Five steps, each surfaced as a stage in the
  * modal so the user knows what's happening:
- *   1. Ensure VantaVault recognises the borrower (one-shot register).
- *   2. User signs cTF.safeTransferFrom on Polygon → tokens land in
- *      VantaVault, emitting a TransferSingle the runtime watches.
+ *   1. Ensure VantaVault recognises the borrower-PROXY
+ *      (one-shot register; runtime admin pays gas).
+ *   2. EOA signs a meta-tx that Polymarket's relayer submits on the
+ *      proxy's behalf — the proxy then calls
+ *      `CTF.safeTransferFrom(proxy → VantaVault)`. This is the only
+ *      shape that works with Polymarket-managed Safe wallets; the
+ *      EOA cannot directly transfer tokens it doesn't own.
  *   3. Wait for the runtime to sign a loan.pledge event citing the
- *      transfer (SSE; up to ~30s with 6 confirmations).
+ *      relayed transfer (SSE; up to ~90s).
  *   4. POST /api/origination with the pledgeEventId → real
  *      LoanBook.originate broadcast on Base mainnet.
  *   5. Surface the resulting loanId + tx hash.
  */
 async function runRealBorrow(args: RealBorrowArgs): Promise<void> {
-  // 1. Register on VantaVault if needed.
-  args.setStage({ kind: "submitting", step: "checking borrower registration…" });
+  // 1. Register the PROXY on VantaVault if needed. The proxy will be
+  //    the `from` of the upcoming TransferSingle and VantaVault gates
+  //    onERC1155Received by `borrowerRegistry[from]` (I-VV-1), so it
+  //    is the proxy — not the EOA — that must be registered.
+  args.setStage({ kind: "submitting", step: "checking proxy registration…" });
   const statusRes = await fetch(
     `/api/runtime/borrower/status?borrower=${args.borrower}`,
   );
@@ -882,7 +1118,7 @@ async function runRealBorrow(args: RealBorrowArgs): Promise<void> {
   if (!statusBody.registered) {
     args.setStage({
       kind: "submitting",
-      step: "registering wallet on vantavault (gas paid by tee)…",
+      step: "registering proxy on vantavault (gas paid by tee)…",
     });
     const regRes = await fetch("/api/runtime/borrower/register", {
       method: "POST",
@@ -898,24 +1134,45 @@ async function runRealBorrow(args: RealBorrowArgs): Promise<void> {
       );
     }
     // Wait briefly so the Polygon node sees the registration before
-    // we ask the user to send tokens (ERC-1155 onReceived would
+    // we ask the proxy to send tokens (ERC-1155 onReceived would
     // revert if the registry hasn't caught up).
     await new Promise((r) => setTimeout(r, 4_000));
   }
 
-  // 2. User signs the CTF transfer on Polygon.
+  // 2. EOA signs the relayer EIP-712 Batch. Polymarket's relayer pays
+  //    gas and submits the wallet's `executeBatch([safeTransferFrom(
+  //    wallet → vault, ...)])` on Polygon. We get back a relayer
+  //    transaction id to poll.
+  const pledgeAmount = BigInt(Math.max(1, args.shares)) * 1_000_000n;
   args.setStage({
     kind: "submitting",
-    step: "sign cTF.safeTransferFrom in your wallet (polygon)…",
+    step: "sign relayer batch in your wallet (polygon)…",
   });
-  // Pledge ALL the user's shares of this position (6 decimals on the CTF).
-  const pledgeAmount = BigInt(Math.max(1, args.shares)) * 1_000_000n;
-  const txHash = await args.writeContractAsync({
-    address: POLYMARKET_CTF_ADDRESS,
-    abi: CTF_TRANSFER_ABI,
-    functionName: "safeTransferFrom",
-    args: [args.borrower, VANTA_VAULT_ADDRESS, BigInt(args.tokenId), pledgeAmount, "0x"],
+  const relayerTxId = await submitWalletCtfTransfer({
+    auth: args.auth,
+    eoa: args.eoa,
+    wallet: args.borrower,
+    ctfAddress: POLYMARKET_CTF_ADDRESS as Address,
+    tokenId: BigInt(args.tokenId),
+    amount: pledgeAmount,
+    recipient: VANTA_VAULT_ADDRESS as Address,
     chainId: POLYMARKET_CTF_CHAIN_ID,
+    signTypedData: (typedArgs) =>
+      args.signTypedDataAsync({
+        domain: typedArgs.domain,
+        types: typedArgs.types,
+        primaryType: typedArgs.primaryType,
+        message: typedArgs.message,
+      }),
+  });
+  args.setStage({
+    kind: "submitting",
+    step: `relayer queued (${relayerTxId.slice(0, 8)}…) — waiting for polygon mining…`,
+  });
+  const txHash = await pollRelayerTx({
+    auth: args.auth,
+    transactionId: relayerTxId,
+    timeoutMs: 120_000,
   });
 
   // 3. Wait for the runtime to sign a loan.pledge event citing this tx.

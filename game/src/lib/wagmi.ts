@@ -7,7 +7,7 @@ import {
   metaMaskWallet,
   rainbowWallet,
 } from "@rainbow-me/rainbowkit/wallets";
-import { http, createConfig } from "wagmi";
+import { fallback, http, createConfig } from "wagmi";
 import { base, baseSepolia, polygon, polygonAmoy } from "wagmi/chains";
 
 import { demoWallet } from "./wallets/demo-wallet";
@@ -46,9 +46,23 @@ const connectors = connectorsForWallets(walletGroups, {
 const baseRpc = IS_MAINNET
   ? "https://mainnet.base.org"
   : "http://127.0.0.1:8545";
-const polygonRpc = IS_MAINNET
-  ? "https://polygon-rpc.com"
-  : "http://127.0.0.1:8546";
+
+// Polygon mainnet has been flaky on `polygon-rpc.com` — Polygon Labs
+// gates the public endpoint behind a Tenant API key and silently
+// returns 401 to anonymous browsers, which breaks every read
+// (multicall, balanceOf for CTF positions, etc.). Fallback list of
+// public RPCs that actually serve unauthenticated traffic at time of
+// writing; viem rotates on failure.
+const polygonRpcs = IS_MAINNET
+  ? [
+      "https://polygon.drpc.org",
+      "https://polygon-bor-rpc.publicnode.com",
+      "https://1rpc.io/matic",
+    ]
+  : ["http://127.0.0.1:8546"];
+
+const polygonTransport = fallback(polygonRpcs.map((url) => http(url)));
+const polygonAmoyTransport = http("http://127.0.0.1:8546");
 
 export const wagmiConfig = IS_MAINNET
   ? createConfig({
@@ -56,7 +70,7 @@ export const wagmiConfig = IS_MAINNET
       connectors,
       transports: {
         [base.id]: http(baseRpc),
-        [polygon.id]: http(polygonRpc),
+        [polygon.id]: polygonTransport,
       },
     })
   : createConfig({
@@ -64,6 +78,6 @@ export const wagmiConfig = IS_MAINNET
       connectors,
       transports: {
         [baseSepolia.id]: http(baseRpc),
-        [polygonAmoy.id]: http(polygonRpc),
+        [polygonAmoy.id]: polygonAmoyTransport,
       },
     });

@@ -9,6 +9,7 @@
     "preview": "vite preview --port 3031"
   },
   "dependencies": {
+    "@polymarket/builder-relayer-client": "^0.0.9",
     "@rainbow-me/rainbowkit": "^2.1.7",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
