@@ -226,17 +226,15 @@ function checkPledgeEvent(
       },
     );
   }
-  if (ev.body.borrower_proxy.toLowerCase() !== req.borrower.toLowerCase()) {
-    throw new OriginationError(
-      "borrower_mismatch",
-      "request.borrower does not match the cited pledge event's borrower_proxy",
-      {
-        pledge_event_id: req.pledge_event_id,
-        request_borrower: req.borrower,
-        pledge_borrower_proxy: ev.body.borrower_proxy,
-      },
-    );
-  }
+  // The pledge event lives on Polygon (collateral source = Polymarket
+  // DepositWallet proxy). Drawing USDC into that proxy address on Base
+  // is uncontrollable for the user since Polymarket proxies are Polygon-
+  // only. The route therefore accepts a `recipient` override pointing at
+  // the user's EOA on Base, and we no longer require `req.borrower` to
+  // equal `borrower_proxy`. Authorisation still rides the pledge event:
+  // the TEE only signs pledges for transfers it observed on Polygon, so
+  // the only addresses that could anchor an origination request are
+  // those whose proxy has actually deposited CTF into the vault.
 }
 
 /**

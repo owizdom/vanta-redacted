@@ -1299,7 +1299,8 @@ interface WaitArgs {
  */
 async function waitForPledgeEvent(args: WaitArgs): Promise<string | null> {
   const deadline = Date.now() + args.timeoutMs;
-  const txLower = args.txHash.toLowerCase();
+  const normHex = (s: string): string => s.toLowerCase().replace(/^0x/, "");
+  const txLower = normHex(args.txHash);
   const borrowerLower = args.borrower.toLowerCase();
 
   return new Promise<string | null>((resolve) => {
@@ -1316,7 +1317,7 @@ async function waitForPledgeEvent(args: WaitArgs): Promise<string | null> {
       if (e.type !== "loan.pledge") return;
       const body = (e as { body?: Record<string, unknown> }).body;
       if (!body) return;
-      const tx = String(body["tx_hash"] ?? "").toLowerCase();
+      const tx = normHex(String(body["tx_hash"] ?? ""));
       const bp = String(body["borrower_proxy"] ?? "").toLowerCase();
       if (tx === txLower && bp === borrowerLower) finish(e.id);
     });
@@ -1332,7 +1333,7 @@ async function waitForPledgeEvent(args: WaitArgs): Promise<string | null> {
         const j = (await r.json()) as { events?: { id: string; type: string; body?: Record<string, unknown> }[] };
         for (const ev of j.events ?? []) {
           if (ev.type !== "loan.pledge") continue;
-          const tx = String(ev.body?.["tx_hash"] ?? "").toLowerCase();
+          const tx = normHex(String(ev.body?.["tx_hash"] ?? ""));
           const bp = String(ev.body?.["borrower_proxy"] ?? "").toLowerCase();
           if (tx === txLower && bp === borrowerLower) {
             finish(ev.id);
