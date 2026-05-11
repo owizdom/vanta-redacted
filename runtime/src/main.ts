@@ -51,6 +51,7 @@ import { registerServiceRoutes } from "./http/routes/services.js";
 import { registerStateRoute } from "./http/routes/state.js";
 import { registerDevProbeRoute } from "./http/routes/dev-probe.js";
 import { registerAdminDeployRoutes } from "./http/routes/admin-deploy.js";
+import { registerAdminPledgeWatcherRoute } from "./http/routes/admin-pledge-watcher.js";
 import { registerBorrowerRoute } from "./http/routes/borrower.js";
 import { registerBridgeRoutes } from "./http/routes/bridge.js";
 import { registerAgentsRoutes } from "./http/routes/agents.js";
@@ -304,6 +305,20 @@ async function startMain(): Promise<void> {
         : http(config.amoyRpcUrl),
   });
 
+  // Hoist the LoopContext + pledge-watcher creation up here so the
+  // pledge-watcher admin route can capture a live reference at
+  // registration time (routes register before app.listen, but the
+  // watcher itself only starts after the HTTP surface is up).
+  const ctx: LoopContext = buildLoopContext(boot, amoyClient);
+  const pledgeWatcher: PledgeWatcher = createPledgeWatcher({
+    polygonClient: amoyClient,
+    ctfAddress: config.polymarketCtfAddress,
+    vantaVaultAddress: config.vantaVaultAddress,
+    events: ctx.events,
+    genesisId: ctx.genesisId,
+    marketsCache: boot.marketsCache,
+  });
+
   const app = createApp({ config, bootstrap: boot });
   await registerHealthzRoute(app);
   await registerTeeRoute(app);
@@ -323,6 +338,11 @@ async function startMain(): Promise<void> {
     walletClient: boot.walletClient,
     publicClient: boot.publicClient,
     adminPrivateKey: boot.origination.privateKey,
+  });
+  await registerAdminPledgeWatcherRoute(app, {
+    enabled: config.deployAdminEnabled,
+    token: config.deployAdminToken,
+    watcher: pledgeWatcher,
   });
   await registerBorrowerRoute(app, {
     polygonClient: amoyClient,
@@ -492,8 +512,8 @@ async function startMain(): Promise<void> {
   // ----- Three continuous reasoning loops (paper §7) ---------------------
   // Construct the loops BEFORE app.listen so we can bind their refs
   // into the state route registration; loops are start()-ed later so
-  // ticks only fire once the HTTP surface is alive.
-  const ctx: LoopContext = buildLoopContext(boot, amoyClient);
+  // ticks only fire once the HTTP surface is alive. (`ctx` is now
+  // hoisted above with the pledge-watcher; we re-use that instance.)
 
   const creditLoop = createCreditLoop({
     ctx,
@@ -672,21 +692,10 @@ async function startMain(): Promise<void> {
   boot.agentState.start();
   boot.marketsCache.start();
 
-  // Polygon CTF pledge watcher — turns real on-chain pledges into
-  // signed loan.pledge events the borrower can cite to /api/origination.
-  const pledgeWatcher: PledgeWatcher = createPledgeWatcher({
-    polygonClient: amoyClient,
-    ctfAddress: config.polymarketCtfAddress,
-    vantaVaultAddress: config.vantaVaultAddress,
-    events: ctx.events,
-    genesisId: ctx.genesisId,
-    marketsCache: boot.marketsCache,
-    log: {
-      info: (m) => app.log.info(m),
-      warn: (m) => app.log.warn(m),
-      error: (m) => app.log.error(m),
-    },
-  });
+  // The pledge-watcher itself was hoisted above so the admin route
+  // could capture a live reference; start it once the HTTP surface is
+  // alive so the live subscription has the same "post-listen" timing
+  // as the rest of the loops.
   pledgeWatcher.start();
   app.log.info(
     { ctf: config.polymarketCtfAddress, vault: config.vantaVaultAddress },
