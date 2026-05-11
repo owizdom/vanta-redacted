@@ -49,6 +49,23 @@ const OriginationBodySchema = z
       .int()
       .positive(),
     pledgeEventId: z.string().regex(HEX64, "must be 64-char lowercase hex"),
+    /**
+     * Optional disbursement recipient. The pledge event identifies
+     * the *collateral source* (`borrower_proxy`) — for Polymarket
+     * users that's a Safe-style contract on Polygon. But the same
+     * address on Base has no contract code and the user can't
+     * control it, so USDC drawn into `borrower_proxy` on Base is
+     * dead funds. Frontend supplies the user's EOA here; LoanBook's
+     * `drawFor` sends USDC to that address instead.
+     *
+     * Falls back to `pledge.borrower_proxy` when omitted to preserve
+     * the original behaviour for callers that already deploy
+     * contracts at the proxy address on Base.
+     */
+    recipient: z
+      .string()
+      .regex(ETH_ADDR, "must be a 0x-prefixed 20-byte hex address")
+      .optional(),
   })
   .strict();
 
@@ -140,7 +157,14 @@ export async function registerOriginationRoute(
         return { error: "cited_event_not_a_pledge" };
       }
       const pledgeBody = pledgeEvent.body;
-      const borrower = pledgeBody.borrower_proxy;
+      // The pledge captures the *proxy* (collateral source). The
+      // LoanBook "borrower" — recipient of `drawFor` USDC + the
+      // address whose repayment the contract expects at maturity —
+      // is whichever the caller passes as `recipient`, defaulting
+      // back to the proxy. For Polymarket Safe wallets the proxy
+      // lives on Polygon, so an EOA recipient on Base is the only
+      // way the user can actually access the disbursed USDC.
+      const borrower = (body.recipient ?? pledgeBody.borrower_proxy) as string;
       const conditionId = pledgeBody.condition_id;
       // tokenId is not on the pledge body in the v0 event schema; the
       // caller passes it in as positionId. Document and trust.

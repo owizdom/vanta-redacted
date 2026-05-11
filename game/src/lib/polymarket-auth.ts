@@ -34,6 +34,12 @@ export interface ApiCreds {
   readonly passphrase: string;
 }
 
+interface BuilderApiKeyListEntry {
+  readonly key: string;
+  readonly createdAt?: string;
+  readonly revokedAt?: string;
+}
+
 const CLOB_AUTH_TYPES = {
   ClobAuth: [
     { name: "address", type: "address" },
@@ -66,12 +72,20 @@ export interface DeriveApiKeyArgs {
 }
 
 /**
- * Sign a ClobAuth EIP-712 message, then POST to the CLOB
- * `/auth/api-key` endpoint. Returns the issued credentials.
+ * Two-step credential derivation: L1 sign → CLOB creds → bootstrap
+ * Builder creds. **Builder creds are what the relayer accepts**, not
+ * CLOB creds (the relayer's `POLY_BUILDER_*` namespace is disjoint
+ * from CLOB's `POLY_*` L2 namespace). We persist only the Builder
+ * triple, since that's what every relayer call HMACs against.
  *
- * Polymarket reissues credentials each call — caller should persist
- * the returned triple (e.g. `localStorage`) so we sign only once per
- * browser session.
+ * Flow:
+ *   1. EIP-712 sign ClobAuth domain
+ *   2. GET /auth/derive-api-key — idempotent, deterministic CLOB creds
+ *   3. POST /auth/builder-api-key, L2-auth'd with the CLOB creds —
+ *      returns fresh Builder creds. POST creates a new builder key
+ *      each call; on hitting Polymarket's per-account quota the
+ *      endpoint 4xx's and we surface the error so the user can
+ *      revoke one in polymarket.com developer settings.
  */
 export async function deriveApiKey(args: DeriveApiKeyArgs): Promise<ApiCreds> {
   const timestamp = Math.floor(Date.now() / 1000).toString();
@@ -93,13 +107,10 @@ export async function deriveApiKey(args: DeriveApiKeyArgs): Promise<ApiCreds> {
     },
   });
 
-  // `/auth/derive-api-key` is idempotent — deterministic credentials
-  // for a given (eoa, signature) pair, no quota issues. The sibling
-  // `POST /auth/api-key` *creates* new keys and 400s with "Could not
-  // create api key" once the user's key quota is hit, which most
-  // long-time Polymarket users have already exceeded. See clob-client
-  // `deriveApiKey()` for the canonical implementation.
-  const res = await fetch(`${CLOB_BASE}/auth/derive-api-key`, {
+  // 1. CLOB creds (idempotent, no quota — `POST /auth/api-key` would
+  // create a fresh CLOB triple each time and quickly hit the 5-key
+  // ceiling for any long-time Polymarket user).
+  const clobRes = await fetch(`${CLOB_BASE}/auth/derive-api-key`, {
     method: "GET",
     headers: {
       POLY_ADDRESS: args.eoa,
@@ -108,26 +119,106 @@ export async function deriveApiKey(args: DeriveApiKeyArgs): Promise<ApiCreds> {
       POLY_NONCE: "0",
     },
   });
-  if (!res.ok) {
+  if (!clobRes.ok) {
     throw new Error(
-      `clob derive-api-key ${String(res.status)}: ${(await res.text()).slice(0, 200)}`,
+      `clob derive-api-key ${String(clobRes.status)}: ${(await clobRes.text()).slice(0, 200)}`,
     );
   }
-  const out = (await res.json()) as {
+  const clobOut = (await clobRes.json()) as {
     apiKey?: string;
     secret?: string;
     passphrase?: string;
   };
   if (
-    typeof out.apiKey !== "string" ||
-    typeof out.secret !== "string" ||
-    typeof out.passphrase !== "string"
+    typeof clobOut.apiKey !== "string" ||
+    typeof clobOut.secret !== "string" ||
+    typeof clobOut.passphrase !== "string"
   ) {
     throw new Error(
-      `clob auth-key: missing credential fields in response ${JSON.stringify(out).slice(0, 200)}`,
+      `clob auth-key: missing credential fields in response ${JSON.stringify(clobOut).slice(0, 200)}`,
     );
   }
-  return { key: out.apiKey, secret: out.secret, passphrase: out.passphrase };
+  const clobCreds: ApiCreds = {
+    key: clobOut.apiKey,
+    secret: clobOut.secret,
+    passphrase: clobOut.passphrase,
+  };
+
+  // 2. List existing builder keys — if any unrevoked one is already
+  // registered for this user, we can't recover its secret (the GET
+  // shape doesn't surface it) but knowing it's there tells us to use
+  // `POST` of an *additional* key rather than tripping the quota
+  // check on a duplicate. In practice Polymarket allows multiple
+  // active builder keys per account so the POST below is safe; this
+  // GET is observational only and used to give better errors.
+  const listTs = Math.floor(Date.now() / 1000);
+  const listSig = await buildHmacSignature(
+    clobCreds.secret,
+    listTs,
+    "GET",
+    "/auth/builder-api-key",
+  );
+  await fetch(`${CLOB_BASE}/auth/builder-api-key`, {
+    method: "GET",
+    headers: {
+      POLY_ADDRESS: args.eoa,
+      POLY_API_KEY: clobCreds.key,
+      POLY_PASSPHRASE: clobCreds.passphrase,
+      POLY_SIGNATURE: listSig,
+      POLY_TIMESTAMP: String(listTs),
+    },
+  });
+
+  // 3. Create a fresh Builder key. The response is the only place
+  // the HMAC secret is ever returned in cleartext — persist
+  // immediately. If you need to rotate later, revoke + recreate.
+  const createTs = Math.floor(Date.now() / 1000);
+  const createSig = await buildHmacSignature(
+    clobCreds.secret,
+    createTs,
+    "POST",
+    "/auth/builder-api-key",
+  );
+  const builderRes = await fetch(`${CLOB_BASE}/auth/builder-api-key`, {
+    method: "POST",
+    headers: {
+      POLY_ADDRESS: args.eoa,
+      POLY_API_KEY: clobCreds.key,
+      POLY_PASSPHRASE: clobCreds.passphrase,
+      POLY_SIGNATURE: createSig,
+      POLY_TIMESTAMP: String(createTs),
+    },
+  });
+  if (!builderRes.ok) {
+    throw new Error(
+      `clob create-builder-key ${String(builderRes.status)}: ${(await builderRes.text()).slice(0, 200)}`,
+    );
+  }
+  const builderOut = (await builderRes.json()) as Partial<ApiCreds> & {
+    apiKey?: string;
+  };
+  // Polymarket has been inconsistent with `apiKey` vs `key` field
+  // naming across services — accept either.
+  const builderKey =
+    typeof builderOut.key === "string"
+      ? builderOut.key
+      : typeof builderOut.apiKey === "string"
+        ? builderOut.apiKey
+        : undefined;
+  if (
+    typeof builderKey !== "string" ||
+    typeof builderOut.secret !== "string" ||
+    typeof builderOut.passphrase !== "string"
+  ) {
+    throw new Error(
+      `clob create-builder-key: missing credential fields ${JSON.stringify(builderOut).slice(0, 200)}`,
+    );
+  }
+  return {
+    key: builderKey,
+    secret: builderOut.secret,
+    passphrase: builderOut.passphrase,
+  };
 }
 
 /**

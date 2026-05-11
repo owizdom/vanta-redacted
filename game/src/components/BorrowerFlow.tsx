@@ -429,9 +429,16 @@ export function BorrowerFlow({ kingdom, open, onClose }: Props): JSX.Element | n
         });
         return;
       }
-      const auth: RelayerAuth = credsValid && pmCreds !== null
-        ? { mode: "builder", creds: pmCreds, eoa: address }
-        : { mode: "relayer-key", apiKey: pmApiKey.trim(), eoa: address };
+      // Prefer the pasted RELAYER_API_KEY over the CLOB-derived
+      // "builder" creds. The CLOB and the relayer accept different
+      // credential namespaces — `/auth/derive-api-key` returns CLOB
+      // L2 creds that the relayer rejects with 401 "invalid
+      // authorization". Until Polymarket exposes a public derive
+      // endpoint for builder creds, the manual relayer key remains
+      // the path that actually authenticates against /submit.
+      const auth: RelayerAuth = apiKeyValid
+        ? { mode: "relayer-key", apiKey: pmApiKey.trim(), eoa: address }
+        : { mode: "builder", creds: pmCreds!, eoa: address };
       try {
         await runRealBorrow({
           borrower: proxyAddr,
@@ -1204,6 +1211,12 @@ async function runRealBorrow(args: RealBorrowArgs): Promise<void> {
       positionId: args.tokenId,
       requestedPrincipalCapUsdc6: args.principalUsdc6.toString(),
       maturityTs: args.maturityTsUnix,
+      // The pledge's borrower_proxy is the Polymarket DepositWallet
+      // (Polygon-only contract). USDC drawn into that address on
+      // Base would be stuck. Send the disbursement to the user's
+      // EOA — same address the EOA already controls + can repay
+      // from at maturity.
+      recipient: args.eoa,
     }),
   });
   const origBody = (await origRes.json()) as
