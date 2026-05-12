@@ -41,6 +41,8 @@ Three loops run continuously:
 
 Every event is appended to a hash-linked log (RFC 8785 canonical JSON, Ed25519). Loans are sequenced by event lineage, not block number — the chain is for finality, the log is for reasoning.
 
+![VANTA architecture: TEE-attested AI lender for Polymarket CTF collateral, cross-chain settlement Polygon → Base](docs/images/vanta-architecture.png)
+
 ## What this gets you
 
 **Verifiable reasoning.** Each `op.inference` event includes the prompt, the model, the response, and the signature. The model identity is attested by the Gateway JWT (claim `sub` is the actual provider account billed); the signature is rooted in the enclave attestation. Nobody can publish a prompt log that doesn't match what the model actually saw.
@@ -125,6 +127,8 @@ Called out so reviewers don't have to dig:
 5. USDC lands in your wallet; the loan event is in the TEE log forever.
 
 **Watch:** open the world. No wallet needed.
+
+![VANTA borrower user flow: land → pick a Polymarket position → request loan → watch the TEE sign → watch the council deliberate → loan originated on Base](docs/images/vanta-userflow.png)
 
 ## Quickstart
 
