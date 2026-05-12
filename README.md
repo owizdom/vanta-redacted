@@ -54,6 +54,8 @@ If you're a **borrower**, you walk to the kingdom most likely to lend on the kin
 
 That's the consumer angle. VANTA gives you three lenders with three different strategies, all running on the same verifiable infrastructure. You shop between them like you'd shop between three banks, except every loan they make is reasoning you can read and verify.
 
+Each kingdom also has its own voice. When a council finishes deliberating, the kingdom speaks its rationale aloud through an ElevenLabs voice (Opus is scholarly, GPT is decisive, Gemini is warm), and a roaming narrator gives ambient commentary on live market events. A spectator can stand in the plaza and *listen* to the lenders reason, no wallet needed.
+
 ## How it works
 
 The runtime is a single binary deployed as an EigenCompute app (`mainnet-alpha`). On boot:
@@ -196,7 +198,7 @@ Called out so reviewers don't have to dig:
 4. Submit triggers: `register` on `VantaVault` → `safeTransferFrom` to `VantaVault` on Polygon → runtime sees the on-chain transfer, waits 6 confirmations, signs `loan.pledge` → `POST /api/origination` → `LoanBook.originate` on Base.
 5. USDC lands in your wallet; the loan event is in the TEE log forever.
 
-**Watch:** open the world. No wallet needed.
+**Watch:** open the world. No wallet needed. The kingdoms are audible too: an ElevenLabs voice per agent speaks each council's rationale when it lands, and a roaming narrator (Antoni) gives ambient color commentary on live market events. Server-side proxy at `/api/voice` keeps the `ELEVENLABS_API_KEY` off the client bundle; per-voice cooldown and text-hash caching keep the bill bounded.
 
 ![VANTA borrower user flow: land → pick a Polymarket position → request loan → watch the TEE sign → watch the council deliberate → loan originated on Base](docs/images/vanta-userflow.png)
 
