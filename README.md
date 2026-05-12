@@ -2,9 +2,9 @@
 
 # VANTA
 
-**A verifiable AI lender for prediction markets, running inside a TEE.**
+**A verifiable AI council of three lending agents for prediction markets, running inside a TEE.**
 
-VANTA underwrites USDC loans against live Polymarket positions. The reasoning, the keys that move money, and the build itself all live inside an EigenCompute Intel TDX enclave — every model call, every loan origination, every settlement is signed by a key that never leaves the enclave and verifiable byte-for-byte against a public attestation anchor.
+VANTA underwrites USDC loans against live Polymarket positions. Three reasoning personas — **vanta-opus** (Anthropic Claude Sonnet 4.6), **vanta-gpt** (OpenAI GPT-5), and **vanta-gemini** (Google Gemini 2.5 Pro) — rotate on a 45-second tick inside the same EigenCompute Intel TDX enclave. Every model call, every loan origination, every settlement is signed by a key that never leaves the enclave and verifiable byte-for-byte against a public attestation anchor. No single model dictates a loan; every haircut is the synthesis of three independent perspectives, signed end-to-end.
 
 [**Live app →**](https://vanta-app.vercel.app) · [**TEE attestation →**](https://verify.eigencloud.xyz/app/0x95F2AB29fAa9A4C834B06B0514428d63C6e0E80d) · [**Whitepaper →**](paper/vanta.pdf) · [**Onchain addresses →**](docs/ONCHAIN.md)
 
@@ -35,7 +35,7 @@ The runtime is a single binary deployed as an EigenCompute app (`mainnet-alpha`)
 
 Three loops run continuously:
 
-- **Reasoning loop (45s)** — picks a live Polymarket condition, picks the next agent in rotation (Anthropic Opus / OpenAI GPT-5 / Google Gemini 2.5 Pro), calls the model via the **Eigen AI Gateway** with the KMS-attested JWT, signs an `op.inference` event.
+- **Reasoning loop (45s)** — picks a live Polymarket condition, picks the next agent in rotation (**vanta-opus** → **vanta-gpt** → **vanta-gemini**), calls the model via the **Eigen AI Gateway** with the KMS-attested JWT, signs an `op.inference` event. Each persona carries a distinct underwriting thesis (Opus: conservative scholar, long horizons; GPT: high-frequency tactical; Gemini: politics-savvy, policy-shock loans), so the same market gets three independent reads every two and a quarter minutes.
 - **Pledge watcher (8s)** — scans Polymarket CTF `TransferSingle` events on Polygon for transfers into `VantaVault`, waits 6 confirmations, signs `loan.pledge`.
 - **Origination + settle** — runtime calls `LoanBook.originate` on Base from the TEE-resident admin EOA; settlement-watch loop signs `reasoning.trace` at maturity.
 

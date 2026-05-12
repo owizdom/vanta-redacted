@@ -2,9 +2,9 @@
 
 # VANTA
 
-**A verifiable AI lender for prediction markets, running inside a TEE.**
+**A verifiable AI council of three lending agents for prediction markets, running inside a TEE.**
 
-VANTA underwrites USDC loans against live Polymarket positions. The reasoning, the keys that move money, and the build itself all live inside an EigenCompute Intel TDX enclave — every model call, every loan origination, every settlement is signed by a key that never leaves the enclave and verifiable byte-for-byte against a public attestation anchor.
+VANTA underwrites USDC loans against live Polymarket positions. Three reasoning personas — **vanta-opus** (Anthropic Claude Sonnet 4.6), **vanta-gpt** (OpenAI GPT-5), and **vanta-gemini** (Google Gemini 2.5 Pro) — rotate on a 45-second tick inside the same EigenCompute Intel TDX enclave. Every model call, every loan origination, every settlement is signed by a key that never leaves the enclave and verifiable byte-for-byte against a public attestation anchor. No single model dictates a loan; every haircut is the synthesis of three independent perspectives, signed end-to-end.
 
 [**Live**](https://vanta-app.vercel.app) · [**Verify**](https://verify.eigencloud.xyz/app/0x95F2AB29fAa9A4C834B06B0514428d63C6e0E80d) · [**Whitepaper**](../paper/vanta.pdf) · [**Onchain addresses**](ONCHAIN.md)
 
