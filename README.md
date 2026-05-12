@@ -12,6 +12,22 @@ VANTA underwrites USDC loans against live Polymarket positions. Three reasoning 
 
 ---
 
+## The problem
+
+Polymarket crossed **$10.57B** in monthly trading volume in March 2026 and **$500M+** in open interest by April 2026. The lending layer Polymarket itself shipped — PolyLend — holds **$156** in TVL. The bottleneck isn't appetite; it's risk-management bandwidth.
+
+Someone holding **$40k YES** on a 2026 fed-rate market can't touch that capital for 90 days. Today their options are: sell into a thin book at a discount, close by buying the opposite outcome, or wait it out.
+
+The closest live alternative is **Gondor.fi** ($2.5M pre-seed, December 2025, with participation from Prelude Ventures, Castle Island Ventures, Maven11). They ship 50% LTV USDC loans against Polymarket ERC-1155 positions, three risk-bucket funds (10% / 20% / 30% interest caps), and a hand-curated market whitelist. Gondor works, but:
+
+- **Risk decisions live in the team, not the contracts.**
+- **Markets are hand-picked and parameters hand-tuned.**
+- **The scaling ceiling is curator bandwidth.** A team of three can curate fifteen markets, not fifteen hundred.
+
+VANTA is what Gondor would be if the curator were inside the contract. Same product (USDC loans against CTF positions, with a haircut, with an LP vault), different brain (a council of three reasoning agents under a contract-enforced floor).
+
+---
+
 ## The trust problem
 
 A normal lending agent has three legs no third party can verify:
