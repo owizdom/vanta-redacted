@@ -106,6 +106,42 @@ If you can't *see* the trust property, it doesn't exist. The product is built ar
 - **MadeSovereignWith link.** Every page links to `verify.eigencloud.xyz/app/0x95F2AB29...`. The button is in the chrome, not buried in a docs page.
 - **`docs/ONCHAIN.md`.** Eight addresses, no marketing — `LpVault`, `LoanBook`, `VantaVault`, USDC, CTF, admin EOA, treasury EOA, App ID. A reviewer can `cast call` every claim in this README in under five minutes.
 
+## Public API surface
+
+Every claim above is verifiable through a public endpoint. No private surfaces, no off-chain magic. Base URL: `https://vanta-app.vercel.app/api/...` (proxied through to the EigenCompute runtime on `mainnet-alpha`).
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/healthz` | Liveness probe |
+| GET | `/api/health/components` | Component health (TEE, RPCs, KMS, AI gateway) |
+| GET | `/api/tee` | Live TEE state: signing pubkey, attestation JWT, image digest, admin + treasury EOAs |
+| GET | `/api/identity-pin` | On-chain identity pin (binds the running EOA to the attested image) |
+| GET | `/.well-known/attestation` | Full attestation envelope, verifiable against the Eigen KMS |
+| GET | `/api/constitution` | Agent's operating rules: haircut bounds, onboarding caps, prompt templates |
+| GET | `/api/agents` | The three reasoning personas (vanta-opus / vanta-gpt / vanta-gemini), rotation state, infra mode |
+| GET | `/api/state` | Agent state snapshot: markets, loans, treasury balance |
+| GET | `/api/markets/watched` | All Polymarket markets the council is currently reading |
+| GET | `/api/markets/positions` | Open CTF positions held in `VantaVault`, grouped by market |
+| GET | `/api/events` | Paginated signed event log (every prompt, response, decision, origination) |
+| GET | `/api/events/:id` | Single signed event with full canonical body + Ed25519 signature |
+| GET | `/api/events/:id/chain` | Walk the parent-id chain backward from any event to genesis |
+| GET | `/api/events/stream` | SSE feed of new events in real time |
+| GET | `/.well-known/x402` | X402 discovery doc: prices, receiver, asset, issuer pubkey |
+| POST | `/bridge/wizard/quote` | **$0.05 USDC** for a TEE-signed haircut quote (X402-metered) |
+| GET | `/mark/:market_id` | **$0.001 USDC** for a TEE-signed 30-min TWAP mark (X402-metered) |
+| POST | `/api/borrower/register` | Register a Polymarket holder for the borrow flow (TEE pays gas, anti-griefing gated) |
+| POST | `/api/origination` | Originate a loan after a pledge is observed and signed by the watcher |
+
+Try it:
+
+```bash
+curl https://vanta-app.vercel.app/api/tee | jq
+curl https://vanta-app.vercel.app/.well-known/x402 | jq
+curl -N https://vanta-app.vercel.app/api/events/stream    # live SSE
+```
+
+Anyone can pull a `loan.origination` event, verify the Ed25519 signature against the pubkey returned by `/api/tee`, and walk the parent chain back to the original LLM prompt.
+
 ## Onchain footprint (mainnet)
 
 | Contract | Chain | Address |
