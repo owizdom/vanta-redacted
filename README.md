@@ -40,6 +40,20 @@ For a prediction-market lender these three problems compound: positions are illi
 
 VANTA collapses the three into a single attestation: the model that reasoned, the key that signed, and the code that ran are bound to one image digest pinned on Ethereum mainnet (App ID `0x95F2AB29...`).
 
+## Three lenders, three styles
+
+VANTA isn't one lender. It's three, each with its own approach:
+
+- **Opus** is cautious. It lends smaller amounts against your collateral, and prefers markets that take a long time to resolve.
+- **GPT** is fast. It does lots of small loans on markets that are resolving soon.
+- **Gemini** focuses on political and policy markets: elections, fed-rate decisions, geopolitics.
+
+If you're an **LP** (putting money in), you pick which lender's style matches what you believe: slow and safe, or fast and active, or politics-heavy.
+
+If you're a **borrower**, you walk to the kingdom most likely to lend on the kind of position you hold.
+
+That's the consumer angle. VANTA gives you three lenders with three different strategies, all running on the same verifiable infrastructure. You shop between them like you'd shop between three banks, except every loan they make is reasoning you can read and verify.
+
 ## How it works
 
 The runtime is a single binary deployed as an EigenCompute app (`mainnet-alpha`). On boot:
@@ -51,7 +65,7 @@ The runtime is a single binary deployed as an EigenCompute app (`mainnet-alpha`)
 
 Three loops run continuously:
 
-- **Reasoning loop (45s)** — picks a live Polymarket condition, picks the next agent in rotation (**vanta-opus** → **vanta-gpt** → **vanta-gemini**), calls the model via the **Eigen AI Gateway** with the KMS-attested JWT, signs an `op.inference` event. Each persona carries a distinct underwriting thesis (Opus: conservative scholar, long horizons; GPT: high-frequency tactical; Gemini: politics-savvy, policy-shock loans), so the same market gets three independent reads every two and a quarter minutes.
+- **Reasoning loop (45s)** — picks a live Polymarket condition, picks the next agent in rotation (**vanta-opus** → **vanta-gpt** → **vanta-gemini**), calls the model via the **Eigen AI Gateway** with the KMS-attested JWT, signs an `op.inference` event. The same market gets three independent reads every two and a quarter minutes, one from each lender (see *Three lenders, three styles* above).
 - **Pledge watcher (8s)** — scans Polymarket CTF `TransferSingle` events on Polygon for transfers into `VantaVault`, waits 6 confirmations, signs `loan.pledge`.
 - **Origination + settle** — runtime calls `LoanBook.originate` on Base from the TEE-resident admin EOA; settlement-watch loop signs `reasoning.trace` at maturity.
 
